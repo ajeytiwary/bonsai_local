@@ -47,3 +47,19 @@ def test_evolution_promotion():
  assert promote(base,{"pass_rate":.875,"seconds":120,"tokens":1200,"gpu_energy_wh":12})
  assert promote(base,{"pass_rate":.75,"seconds":90,"tokens":1000,"gpu_energy_wh":10})
  assert not promote(base,{"pass_rate":.625,"seconds":10,"tokens":10,"gpu_energy_wh":1})
+
+
+def test_json_parser_selects_schema_not_outer_list():
+ from bonsai_agent.llm import BonsaiLLM
+ x=BonsaiLLM.parse_json('noise [1,2] then {"done":true,"summary":"ok"} trailing',"action")
+ assert x["done"] is True
+
+def test_json_parser_balanced_truncated_tail():
+ from bonsai_agent.llm import BonsaiLLM
+ text='{"verdict":"FAIL","reason":"x","repair":"y"} trailing {"broken":'
+ assert BonsaiLLM.parse_json(text,"verdict")["verdict"]=="FAIL"
+
+def test_json_parser_rejects_wrong_schema():
+ import pytest
+ from bonsai_agent.llm import BonsaiLLM
+ with pytest.raises(ValueError): BonsaiLLM.parse_json('[{"tool":"read_file"}]',"action")
