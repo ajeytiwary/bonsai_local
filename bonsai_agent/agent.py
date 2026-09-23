@@ -27,7 +27,17 @@ class Agent:
 
     def start(self,objective):
         rid=self.db.create_run(objective,str(self.root)); self._rid=rid; self._role("planner")
-        plan=self.llm.json(PLANNER,"OBJECTIVE:\n"+objective+"\n\nREPO MAP:\n"+self.retrieve.repo_map(),1800,expected="plan")
+        task_md=""
+        p=self.root/"TASK.md"
+        if p.exists(): task_md=p.read_text(errors="replace")[:12000]
+        plan_prompt="OBJECTIVE:\n"+objective+"\n\nTASK.md:\n"+task_md+"\n\nREPO MAP:\n"+self.retrieve.repo_map()
+        try:
+            plan=self.llm.json(PLANNER,plan_prompt,700,expected="plan")
+        except Exception as e:
+            # Planning must not make the whole coding run unusable. A single direct
+            # implementation task is a safe deterministic fallback.
+            self.db.event(rid,None,"planner_fallback",{"error":repr(e)})
+            plan={"tasks":[{"title":"Implement acceptance task","description":objective+"\nTASK.md:\n"+task_md,"acceptance":"Configured acceptance tests pass and benchmark tests remain unchanged.","depends_on":[]}]}
         ids=[]
         for i,t in enumerate(plan.get("tasks",[])):
             tid=self.db.add_task(rid,t["title"],t["description"],t.get("acceptance",""),t.get("depends_on",[])); ids.append(tid)
@@ -72,7 +82,7 @@ RELEVANT REPOSITORY CONTEXT:
 RECENT OBSERVATIONS:
 {json.dumps(transcript[-5:],ensure_ascii=False)[:10000]}
 Choose one next action."""
-            self._role("worker",task["id"]); action=self.llm.json(WORKER,prompt,1000,expected="action"); self.db.event(rid,task["id"],"worker",action)
+            self._role("worker",task["id"]); action=self.llm.json(WORKER,prompt,650,expected="action"); self.db.event(rid,task["id"],"worker",action)
             if action.get("done"):
                 return self.verify(rid,task)
             name,args=action.get("tool"),action.get("args",{})
@@ -85,7 +95,13 @@ Choose one next action."""
         for repair in range(self.max_repairs+1):
             tests=self.tools.run_tests(self.tests); diff=self.tools.git_diff()
             evidence=f"TASK:{json.dumps(task)}\nTESTS:\n{tests[-16000:]}\nDIFF:\n{diff[-24000:]}"
-            self._role("verifier",task["id"]); verdict=self.llm.json(VERIFIER,evidence,700,expected="verdict"); self.db.event(rid,task["id"],"verify",verdict)
+            self._role("verifier",task["id"])
+            try:
+                verdict=self.llm.json(VERIFIER,evidence,350,expected="verdict")
+            except Exception as e:
+                self.db.event(rid,task["id"],"verifier_fallback",{"error":repr(e)})
+                verdict={"verdict":"PASS" if tests.startswith("exit=0") else "FAIL","reason":"Deterministic fallback from external test exit status after structured verifier failure.","repair":"Fix the failing configured tests."}
+            self.db.event(rid,task["id"],"verify",verdict)
             if verdict.get("verdict")=="PASS" and tests.startswith("exit=0"):
                 commit=""
                 if self.auto_commit:
@@ -96,7 +112,7 @@ Choose one next action."""
                 self.db.update_task(task["id"],status="blocked",result=verdict.get("reason","")); return False
             if repair<self.max_repairs:
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
-                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],1000,expected="action")
+                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],650,expected="action")
                 if action.get("tool"):
                     try: out=self.tools.execute(action["tool"],action.get("args",{})); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
