@@ -41,7 +41,7 @@ class BonsaiLLM:
             except Exception: pass
         def valid(x):
             if expected=="plan": return isinstance(x,dict) and isinstance(x.get("tasks"),list)
-            if expected=="action": return isinstance(x,dict) and (x.get("done") is True or isinstance(x.get("tool"),str))
+            if expected=="action": return isinstance(x,dict) and (x.get("done") is True or (isinstance(x.get("tool"),str) and isinstance(x.get("args"),dict)))
             if expected=="verdict": return isinstance(x,dict) and x.get("verdict") in {"PASS","FAIL","BLOCKED"}
             return isinstance(x,(dict,list))
         good=[x for x in candidates if valid(x)]
