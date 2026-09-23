@@ -13,9 +13,20 @@ class Agent:
         self.max_repairs=max_repairs; self.retrieve_top_k=retrieve_top_k; self.auto_commit=auto_commit
         self.db=StateDB(self.root/".agent/state.db"); self.tools=WorkspaceTools(self.root,unsafe_shell=unsafe_shell)
         self.retrieve=RepoRetriever(self.root)
+        self._rid=None; self._tid=None
+        if hasattr(self.llm,"bind"): self.llm.bind(self._observe_llm)
+
+    def _observe_llm(self,meta):
+        if self._rid is None: return
+        self.db.log_llm(self._rid,self._tid,meta.get("role","unknown"),meta.get("usage"),meta.get("seconds",0))
+        self.db.event(self._rid,self._tid,"llm",meta)
+
+    def _role(self,role,tid=None):
+        self._tid=tid
+        if hasattr(self.llm,"role"): self.llm.role=role
 
     def start(self,objective):
-        rid=self.db.create_run(objective,str(self.root))
+        rid=self.db.create_run(objective,str(self.root)); self._rid=rid; self._role("planner")
         plan=self.llm.json(PLANNER,"OBJECTIVE:\n"+objective+"\n\nREPO MAP:\n"+self.retrieve.repo_map(),3000)
         ids=[]
         for i,t in enumerate(plan.get("tasks",[])):
@@ -24,6 +35,7 @@ class Agent:
         return rid
 
     def run(self,rid):
+        self._rid=rid
         run=self.db.get_run(rid)
         if not run: raise ValueError("unknown run "+str(rid))
         self.db.set_run_status(rid,"running")
@@ -44,6 +56,7 @@ class Agent:
         finally: telemetry.stop()
 
     def execute_task(self,rid,task,objective):
+        self._role("worker",task["id"])
         self.db.update_task(task["id"],status="running",attempts=task["attempts"]+1)
         transcript=[]
         for _ in range(20):
@@ -59,7 +72,7 @@ RELEVANT REPOSITORY CONTEXT:
 RECENT OBSERVATIONS:
 {json.dumps(transcript[-5:],ensure_ascii=False)[:10000]}
 Choose one next action."""
-            action=self.llm.json(WORKER,prompt,2200); self.db.event(rid,task["id"],"worker",action)
+            self._role("worker",task["id"]); action=self.llm.json(WORKER,prompt,2200); self.db.event(rid,task["id"],"worker",action)
             if action.get("done"):
                 return self.verify(rid,task)
             name,args=action.get("tool"),action.get("args",{})
@@ -72,7 +85,7 @@ Choose one next action."""
         for repair in range(self.max_repairs+1):
             tests=self.tools.run_tests(self.tests); diff=self.tools.git_diff()
             evidence=f"TASK:{json.dumps(task)}\nTESTS:\n{tests[-16000:]}\nDIFF:\n{diff[-24000:]}"
-            verdict=self.llm.json(VERIFIER,evidence,1400); self.db.event(rid,task["id"],"verify",verdict)
+            self._role("verifier",task["id"]); verdict=self.llm.json(VERIFIER,evidence,1400); self.db.event(rid,task["id"],"verify",verdict)
             if verdict.get("verdict")=="PASS" and tests.startswith("exit=0"):
                 commit=""
                 if self.auto_commit:
@@ -83,7 +96,7 @@ Choose one next action."""
                 self.db.update_task(task["id"],status="blocked",result=verdict.get("reason","")); return False
             if repair<self.max_repairs:
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
-                action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],2200)
+                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],2200)
                 if action.get("tool"):
                     try: out=self.tools.execute(action["tool"],action.get("args",{})); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
@@ -92,8 +105,8 @@ Choose one next action."""
 
     def compact(self,rid,objective):
         state={"objective":objective,"tasks":self.db.tasks(rid),"recent_events":self.db.events(rid,30)}
-        summary=self.llm.chat([{"role":"system","content":COMPACTOR},{"role":"user","content":json.dumps(state,ensure_ascii=False)[:26000]}],1600,.1)
+        self._role("compactor"); summary=self.llm.chat([{"role":"system","content":COMPACTOR},{"role":"user","content":json.dumps(state,ensure_ascii=False)[:26000]}],1600,.1)
         self.db.checkpoint(rid,summary)
 
     def status(self,rid):
-        return {"run":self.db.get_run(rid),"tasks":self.db.tasks(rid),"checkpoint":self.db.latest_checkpoint(rid)}
+        return {"run":self.db.get_run(rid),"tasks":self.db.tasks(rid),"checkpoint":self.db.latest_checkpoint(rid),"llm":self.db.llm_summary(rid)}
