@@ -1,0 +1,23 @@
+[project]
+name = "bonsai-local-agent"
+version = "0.1.0"
+description = "Persistent long-horizon agent for local Bonsai via llama.cpp"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31"]
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+bonsai-agent = "bonsai_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bonsai_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
