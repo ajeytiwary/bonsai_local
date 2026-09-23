@@ -1,0 +1,326 @@
+{
+  "version": 1,
+  "note": "40 frozen definitions; train=24 val=8 test=8. Populate local fixture directories.",
+  "tasks": [
+    {
+      "id": "B01",
+      "split": "train",
+      "category": "python-bugfix",
+      "fixture": "benchmarks/fixtures/python-bugfix",
+      "objective": "Complete the python-bugfix acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B02",
+      "split": "train",
+      "category": "python-feature",
+      "fixture": "benchmarks/fixtures/python-feature",
+      "objective": "Complete the python-feature acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B03",
+      "split": "train",
+      "category": "refactor",
+      "fixture": "benchmarks/fixtures/refactor",
+      "objective": "Complete the refactor acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B04",
+      "split": "train",
+      "category": "tests",
+      "fixture": "benchmarks/fixtures/tests",
+      "objective": "Complete the tests acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B05",
+      "split": "train",
+      "category": "cli",
+      "fixture": "benchmarks/fixtures/cli",
+      "objective": "Complete the cli acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B06",
+      "split": "train",
+      "category": "serialization",
+      "fixture": "benchmarks/fixtures/serialization",
+      "objective": "Complete the serialization acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B07",
+      "split": "train",
+      "category": "sqlite",
+      "fixture": "benchmarks/fixtures/sqlite",
+      "objective": "Complete the sqlite acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B08",
+      "split": "train",
+      "category": "filesystem",
+      "fixture": "benchmarks/fixtures/filesystem",
+      "objective": "Complete the filesystem acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B09",
+      "split": "train",
+      "category": "git",
+      "fixture": "benchmarks/fixtures/git",
+      "objective": "Complete the git acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B10",
+      "split": "train",
+      "category": "api",
+      "fixture": "benchmarks/fixtures/api",
+      "objective": "Complete the api acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B11",
+      "split": "train",
+      "category": "python-bugfix",
+      "fixture": "benchmarks/fixtures/python-bugfix",
+      "objective": "Complete the python-bugfix acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B12",
+      "split": "train",
+      "category": "python-feature",
+      "fixture": "benchmarks/fixtures/python-feature",
+      "objective": "Complete the python-feature acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B13",
+      "split": "train",
+      "category": "refactor",
+      "fixture": "benchmarks/fixtures/refactor",
+      "objective": "Complete the refactor acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B14",
+      "split": "train",
+      "category": "tests",
+      "fixture": "benchmarks/fixtures/tests",
+      "objective": "Complete the tests acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B15",
+      "split": "train",
+      "category": "cli",
+      "fixture": "benchmarks/fixtures/cli",
+      "objective": "Complete the cli acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B16",
+      "split": "train",
+      "category": "serialization",
+      "fixture": "benchmarks/fixtures/serialization",
+      "objective": "Complete the serialization acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B17",
+      "split": "train",
+      "category": "sqlite",
+      "fixture": "benchmarks/fixtures/sqlite",
+      "objective": "Complete the sqlite acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B18",
+      "split": "train",
+      "category": "filesystem",
+      "fixture": "benchmarks/fixtures/filesystem",
+      "objective": "Complete the filesystem acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B19",
+      "split": "train",
+      "category": "git",
+      "fixture": "benchmarks/fixtures/git",
+      "objective": "Complete the git acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B20",
+      "split": "train",
+      "category": "api",
+      "fixture": "benchmarks/fixtures/api",
+      "objective": "Complete the api acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B21",
+      "split": "train",
+      "category": "python-bugfix",
+      "fixture": "benchmarks/fixtures/python-bugfix",
+      "objective": "Complete the python-bugfix acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B22",
+      "split": "train",
+      "category": "python-feature",
+      "fixture": "benchmarks/fixtures/python-feature",
+      "objective": "Complete the python-feature acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B23",
+      "split": "train",
+      "category": "refactor",
+      "fixture": "benchmarks/fixtures/refactor",
+      "objective": "Complete the refactor acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B24",
+      "split": "train",
+      "category": "tests",
+      "fixture": "benchmarks/fixtures/tests",
+      "objective": "Complete the tests acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B25",
+      "split": "val",
+      "category": "cli",
+      "fixture": "benchmarks/fixtures/cli",
+      "objective": "Complete the cli acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B26",
+      "split": "val",
+      "category": "serialization",
+      "fixture": "benchmarks/fixtures/serialization",
+      "objective": "Complete the serialization acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B27",
+      "split": "val",
+      "category": "sqlite",
+      "fixture": "benchmarks/fixtures/sqlite",
+      "objective": "Complete the sqlite acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B28",
+      "split": "val",
+      "category": "filesystem",
+      "fixture": "benchmarks/fixtures/filesystem",
+      "objective": "Complete the filesystem acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B29",
+      "split": "val",
+      "category": "git",
+      "fixture": "benchmarks/fixtures/git",
+      "objective": "Complete the git acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B30",
+      "split": "val",
+      "category": "api",
+      "fixture": "benchmarks/fixtures/api",
+      "objective": "Complete the api acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B31",
+      "split": "val",
+      "category": "python-bugfix",
+      "fixture": "benchmarks/fixtures/python-bugfix",
+      "objective": "Complete the python-bugfix acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B32",
+      "split": "val",
+      "category": "python-feature",
+      "fixture": "benchmarks/fixtures/python-feature",
+      "objective": "Complete the python-feature acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B33",
+      "split": "test",
+      "category": "refactor",
+      "fixture": "benchmarks/fixtures/refactor",
+      "objective": "Complete the refactor acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B34",
+      "split": "test",
+      "category": "tests",
+      "fixture": "benchmarks/fixtures/tests",
+      "objective": "Complete the tests acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B35",
+      "split": "test",
+      "category": "cli",
+      "fixture": "benchmarks/fixtures/cli",
+      "objective": "Complete the cli acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B36",
+      "split": "test",
+      "category": "serialization",
+      "fixture": "benchmarks/fixtures/serialization",
+      "objective": "Complete the serialization acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B37",
+      "split": "test",
+      "category": "sqlite",
+      "fixture": "benchmarks/fixtures/sqlite",
+      "objective": "Complete the sqlite acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B38",
+      "split": "test",
+      "category": "filesystem",
+      "fixture": "benchmarks/fixtures/filesystem",
+      "objective": "Complete the filesystem acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B39",
+      "split": "test",
+      "category": "git",
+      "fixture": "benchmarks/fixtures/git",
+      "objective": "Complete the git acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    },
+    {
+      "id": "B40",
+      "split": "test",
+      "category": "api",
+      "fixture": "benchmarks/fixtures/api",
+      "objective": "Complete the api acceptance task described in TASK.md without changing benchmark tests.",
+      "test_command": "pytest -q"
+    }
+  ]
+}
