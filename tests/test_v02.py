@@ -34,3 +34,16 @@ def test_verified_commit_requires_git(tmp_path):
  w=WorkspaceTools(tmp_path)
  out=w.git_status()
  assert out.startswith("exit=")
+
+
+def test_llm_summary(tmp_path):
+ s=StateDB(tmp_path/"a.db"); r=s.create_run("x")
+ s.log_llm(r,None,"planner",{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15},1.25)
+ x=s.llm_summary(r); assert x["calls"]==1 and x["total_tokens"]==15 and x["seconds"]==1.25
+
+def test_evolution_promotion():
+ from bonsai_agent.evolution import promote
+ base={"pass_rate":.75,"seconds":100,"tokens":1000,"gpu_energy_wh":10}
+ assert promote(base,{"pass_rate":.875,"seconds":120,"tokens":1200,"gpu_energy_wh":12})
+ assert promote(base,{"pass_rate":.75,"seconds":90,"tokens":1000,"gpu_energy_wh":10})
+ assert not promote(base,{"pass_rate":.625,"seconds":10,"tokens":10,"gpu_energy_wh":1})
