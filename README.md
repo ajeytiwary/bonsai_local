@@ -235,3 +235,22 @@ The included tests cover SQLite task lifecycle, workspace reads/writes, and path
 ## License
 
 No license has been selected yet. Add one before redistributing or accepting outside contributions.
+
+
+## v0.2 — long-horizon + evolution laboratory
+
+The canonical package is `bonsai_agent`. v0.2 adds resumability, dependency-aware tasks, lexical repo-map retrieval, command safety policy, automatic verified commits, SQLite trajectories, GPU telemetry, a 40-task benchmark and evolution helpers.
+
+Generate fixtures and benchmark:
+
+```bash
+python benchmarks/generate_fixtures.py
+bonsai-bench --split train --out train.json
+bonsai-bench --split val --out val.json
+```
+
+The frozen split is 24 train / 8 validation / 8 held-out test. Never tune on test.
+
+Resume after interruption with `bonsai-agent --repo ~/git/my_project --resume 3`; inspect with `--status 3`. Verified tasks commit automatically only after tests exit 0 and the verifier returns PASS. GPU samples go to `.agent/telemetry-<run>.csv`.
+
+Install optimization support with `pip install -e '.[evolution]'`. Export evidence using `bonsai-evolve --export-gepa val.json --out gepa-dataset.json`. See `docs/EVOLUTION.md`.
