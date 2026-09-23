@@ -70,7 +70,7 @@ def test_structured_schema_is_sent(monkeypatch):
  seen={}
  class R:
   def raise_for_status(self): pass
-  def json(self): return {"usage":{},"choices":[{"message":{"content":"{\\"verdict\\":\\"PASS\\",\\"reason\\":\\"ok\\",\\"repair\\":\\"\\"}"}}]}
+  def json(self): return {"usage":{},"choices":[{"message":{"content":'{"verdict":"PASS","reason":"ok","repair":""}'}}]}
  def post(url,json,timeout): seen.update(json); return R()
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().json("s","u",expected="verdict")
