@@ -45,3 +45,11 @@ class StateDB:
     def checkpoint(self,rid,summary): self.conn.execute("INSERT INTO checkpoints(run_id,summary) VALUES(?,?)",(rid,summary)); self.conn.commit()
     def latest_checkpoint(self,rid):
         r=self.conn.execute("SELECT summary FROM checkpoints WHERE run_id=? ORDER BY id DESC LIMIT 1",(rid,)).fetchone(); return r["summary"] if r else ""
+    def log_llm(self,rid,tid,role,usage,seconds):
+        usage=usage or {}
+        self.conn.execute("INSERT INTO llm_calls(run_id,task_id,role,prompt_tokens,completion_tokens,total_tokens,seconds) VALUES(?,?,?,?,?,?,?)",
+            (rid,tid,role,int(usage.get("prompt_tokens",0) or 0),int(usage.get("completion_tokens",0) or 0),int(usage.get("total_tokens",0) or 0),float(seconds or 0)))
+        self.conn.commit()
+    def llm_summary(self,rid):
+        r=self.conn.execute("SELECT COUNT(*) calls,COALESCE(SUM(prompt_tokens),0) prompt_tokens,COALESCE(SUM(completion_tokens),0) completion_tokens,COALESCE(SUM(total_tokens),0) total_tokens,COALESCE(SUM(seconds),0) seconds FROM llm_calls WHERE run_id=?",(rid,)).fetchone()
+        return dict(r)
