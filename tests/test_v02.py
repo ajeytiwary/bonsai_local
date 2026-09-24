@@ -117,3 +117,21 @@ def test_native_tool_call_parsing(monkeypatch):
  assert seen["tool_choice"]=="auto"
  assert any(tool["function"]["name"]=="run_tests" for tool in seen["tools"])
  assert seen["thinking_budget_tokens"]==2048
+
+
+def test_post_retries_server_500(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ calls={"n":0}
+ class R:
+  def __init__(self,status): self.status_code=status; self.text="boom"
+  def raise_for_status(self):
+   if self.status_code>=400:
+    import requests; raise requests.HTTPError("bad")
+  def json(self): return {"usage":{},"choices":[{"message":{"content":"ok"}}]}
+ def post(url,json,timeout):
+  calls["n"]+=1
+  return R(500 if calls["n"]<3 else 200)
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
+ monkeypatch.setattr("bonsai_agent.llm.time.sleep",lambda _:None)
+ assert BonsaiLLM().chat([{"role":"user","content":"x"}])=="ok"
+ assert calls["n"]==3
