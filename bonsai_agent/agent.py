@@ -82,7 +82,15 @@ RELEVANT REPOSITORY CONTEXT:
 RECENT OBSERVATIONS:
 {json.dumps(transcript[-5:],ensure_ascii=False)[:10000]}
 Choose one next action."""
-            self._role("worker",task["id"]); action=self.llm.json(WORKER,prompt,650,expected="action"); self.db.event(rid,task["id"],"worker",action)
+            self._role("worker",task["id"]); try:
+                action=self.llm.json(WORKER,prompt,650,expected="action",retries=1)
+            except Exception as e:
+                # A malformed worker response is recoverable; record it as an
+                # observation instead of crashing the entire benchmark case.
+                self.db.event(rid,task["id"],"worker_parse_error",{"error":repr(e)})
+                transcript.append({"tool":"worker_protocol","output":"Previous response was not a valid action object. Emit exactly one tool action with args, or done=true."})
+                continue
+            self.db.event(rid,task["id"],"worker",action)
             if action.get("done"):
                 return self.verify(rid,task)
             name,args=action.get("tool"),action.get("args",{})
@@ -112,7 +120,7 @@ Choose one next action."""
                 self.db.update_task(task["id"],status="blocked",result=verdict.get("reason","")); return False
             if repair<self.max_repairs:
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
-                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],650,expected="action")
+                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],650,expected="action",retries=1)
                 if action.get("tool"):
                     try: out=self.tools.execute(action["tool"],action.get("args",{})); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
