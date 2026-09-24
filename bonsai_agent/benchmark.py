@@ -35,7 +35,8 @@ def run_task(task,agent_cmd="bonsai-agent",timeout=1800,url="http://127.0.0.1:80
                 state={**dict(u),"tool_calls":tc,"run_id":r["id"]}
                 state.update(_telemetry(work/".agent"/f"telemetry-{r['id']}.csv"))
         except Exception as e: state={"instrumentation_error":repr(e)}
-        return {"id":task["id"],"split":task["split"],"category":task.get("category"),"agent_exit":cp.returncode,"tests_pass":verify.returncode==0,"seconds":time.time()-start,**state,"stdout":cp.stdout[-4000:],"stderr":cp.stderr[-4000:]}
+        clean=cp.returncode==0; passed=verify.returncode==0
+        return {"id":task["id"],"split":task["split"],"category":task.get("category"),"agent_exit":cp.returncode,"agent_exit_clean":clean,"tests_pass":passed,"task_success":clean and passed,"seconds":time.time()-start,**state,"stdout":cp.stdout[-4000:],"stderr":cp.stderr[-4000:]}
 def main():
     p=argparse.ArgumentParser(); p.add_argument("--tasks",default="benchmarks/tasks.json"); p.add_argument("--split",choices=["train","val","test"]); p.add_argument("--out",default="benchmark-results.json")
     p.add_argument("--url",default="http://127.0.0.1:8091"); p.add_argument("--model",default="Ternary-Bonsai-2-27B-PQ2_0"); p.add_argument("--timeout",type=int,default=1800); a=p.parse_args()
@@ -45,8 +46,12 @@ def main():
         try: results.append(run_task(t,timeout=a.timeout,url=a.url,model=a.model))
         except Exception as e: results.append({"id":t["id"],"split":t["split"],"tests_pass":False,"error":str(e)})
     usable=[x for x in results if not x.get("skipped")]
-    payload={"results":results,"pass_rate":sum(x.get("tests_pass",False) for x in usable)/max(1,len(usable)),
-             "total_seconds":sum(x.get("seconds",0) for x in usable),"total_tokens":sum(x.get("total_tokens",0) for x in usable),
+    payload={"results":results,
+             "pass_rate":sum(x.get("tests_pass",False) for x in usable)/max(1,len(usable)),
+             "clean_success_rate":sum(x.get("task_success",False) for x in usable)/max(1,len(usable)),
+             "clean_exit_rate":sum(x.get("agent_exit_clean",False) for x in usable)/max(1,len(usable)),
+             "total_seconds":sum(x.get("seconds",0) for x in usable),
+             "total_tokens":sum(x.get("total_tokens",0) for x in usable),
              "gpu_energy_wh":sum(x.get("gpu_energy_wh",0) for x in usable)}
     Path(a.out).write_text(json.dumps(payload,indent=2)); print(json.dumps(payload,indent=2))
 if __name__=="__main__": main()
