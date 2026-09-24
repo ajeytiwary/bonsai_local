@@ -1,0 +1,4 @@
+[console_scripts]
+bonsai-agent = bonsai_agent.cli:main
+bonsai-bench = bonsai_agent.benchmark:main
+bonsai-evolve = bonsai_agent.evolution:main

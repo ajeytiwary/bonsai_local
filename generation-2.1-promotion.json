@@ -1,0 +1,15 @@
+{
+  "baseline": {
+    "pass_rate": 0.75,
+    "seconds": 1570.5775413513184,
+    "tokens": 66103,
+    "gpu_energy_wh": 46.20256870991223
+  },
+  "candidate": {
+    "pass_rate": 0.75,
+    "seconds": 2315.3729383945465,
+    "tokens": 136178,
+    "gpu_energy_wh": 97.50271359006734
+  },
+  "promote": false
+}

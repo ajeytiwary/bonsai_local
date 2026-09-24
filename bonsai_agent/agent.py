@@ -96,7 +96,13 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 except Exception as e: out="ERROR: "+repr(e); ok=False
                 self.db.log_tool(rid,task["id"],name,args,out,ok)
                 messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
-            messages=messages[:2]+messages[-10:]
+            # Keep the initial system/user pair exactly once. Drop complete
+            # assistant/tool exchanges so no tool result is left orphaned.
+            while len(messages)>12:
+                end=3
+                while end<len(messages) and messages[end]["role"]=="tool":
+                    end+=1
+                del messages[2:end]
         self.db.update_task(task["id"],status="failed",result="native tool-call step budget exhausted")
 
     def verify(self,rid,task):
@@ -108,7 +114,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 verdict=self.llm.json(VERIFIER,evidence,350,expected="verdict",reasoning_budget=512)
             except Exception as e:
                 self.db.event(rid,task["id"],"verifier_fallback",{"error":repr(e)})
-                verdict={"verdict":"PASS" if tests.startswith("exit=0") else "FAIL","reason":"Deterministic fallback from external test exit status after structured verifier failure.","repair":"Fix the failing configured tests."}
+                verdict={"verdict":"BLOCKED","reason":"Structured verifier failed: "+repr(e),"repair":"Retry verification when the model is available."}
             self.db.event(rid,task["id"],"verify",verdict)
             if verdict.get("verdict")=="PASS" and tests.startswith("exit=0"):
                 commit=""

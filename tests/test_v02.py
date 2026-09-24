@@ -117,3 +117,24 @@ def test_native_tool_call_parsing(monkeypatch):
  assert seen["tool_choice"]=="auto"
  assert any(tool["function"]["name"]=="run_tests" for tool in seen["tools"])
  assert seen["thinking_budget_tokens"]==2048
+
+
+def test_native_tool_history_keeps_system_first(tmp_path):
+ from bonsai_agent.agent import Agent
+
+ class FakeLLM:
+  def __init__(self): self.messages=[]
+  def bind(self, observer): pass
+  def tool_turn(self, messages, **kwargs):
+   self.messages.append([m.copy() for m in messages])
+   if len(self.messages)==1:
+    return {"content":"", "tool_calls":[{"id":"c1","name":"read_file","args":{"path":"TASK.md"}}],"finish_reason":"tool_calls"}
+   return {"content":"done", "tool_calls":[],"finish_reason":"stop"}
+
+ (tmp_path/"TASK.md").write_text("task")
+ llm=FakeLLM(); agent=Agent(tmp_path,llm,auto_commit=False)
+ rid=agent.db.create_run("task",str(tmp_path))
+ agent.db.add_task(rid,"task","task")
+ agent.verify=lambda *args: True
+ agent.execute_task(rid,agent.db.tasks(rid)[0],"task")
+ assert [m["role"] for m in llm.messages[1]]==["system","user","assistant","tool"]

@@ -1,0 +1,8 @@
+requests>=2.31
+
+[dev]
+pytest>=8.0
+
+[evolution]
+dspy>=3.0
+gepa>=0.1
