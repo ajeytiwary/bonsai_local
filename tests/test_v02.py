@@ -106,7 +106,8 @@ def test_native_tool_call_parsing(monkeypatch):
  seen={}
  class R:
   def raise_for_status(self): pass
-  def json(self): return {"usage":{},"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\\\"path\\\":\\\"app.py\\\",\\\"content\\\":\\\"x=1\\\"}"}}]}}]}
+  def json(self):
+   return {"usage":{},"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":'{"path":"app.py","content":"x=1"}'}}]}}]}
  def post(url,json,timeout): seen.update(json); return R()
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().tool_turn([{"role":"user","content":"fix it"}])
@@ -114,5 +115,5 @@ def test_native_tool_call_parsing(monkeypatch):
  assert x["tool_calls"][0]["name"]=="write_file"
  assert x["tool_calls"][0]["args"]["path"]=="app.py"
  assert seen["tool_choice"]=="auto"
- assert any(t["function"]["name"]=="run_tests" for t in seen["tools"])
+ assert any(tool["function"]["name"]=="run_tests" for tool in seen["tools"])
  assert seen["thinking_budget_tokens"]==2048
