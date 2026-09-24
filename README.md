@@ -303,3 +303,9 @@ MODEL_ALIAS=bonsai-abliterated-mtp ./benchmarks/long_projects/run_gate.sh
 ```
 
 The MTP deployment produced one clean end-to-end long-project run on 2026-09-24, recorded in `benchmarks/results/long-project-gate.json`. Earlier exploratory runs failed when the worker exhausted its tool calls or the test harness imported the wrong project copy. One clean run is useful evidence, but repeatable reliability for unfamiliar day-to-day projects remains unproven; run this gate repeatedly and supervise real work before relying on unattended edits.
+
+### Large worker edits and safe file writes
+
+Worker and repair calls default to 8192 output tokens. Use `--worker-output-tokens 12288` for a task that needs larger whole-file writes, while keeping the server context large enough for both the prompt and the response (`CONTEXT` in the launcher defaults to 16384). Raising this limit does not improve the model's coding judgment; it only gives a valid tool call room to finish.
+
+The client rejects malformed tool arguments and any tool call whose response ended because it hit `max_tokens`. `write_file` also rejects empty or whitespace-only content and replaces files atomically, preserving existing permissions. These guards protect direct `write_file` calls; commands run through `run_command` still need review because shell redirection can write files independently.

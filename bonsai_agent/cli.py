@@ -6,8 +6,9 @@ def main():
     p=argparse.ArgumentParser(description="Persistent/evolution-ready local Bonsai agent")
     p.add_argument("objective",nargs="?"); p.add_argument("--repo",default="."); p.add_argument("--url",default="http://127.0.0.1:8091"); p.add_argument("--model",default="Ternary-Bonsai-2-27B-PQ2_0")
     p.add_argument("--tests",default="pytest -q"); p.add_argument("--max-steps",type=int,default=100); p.add_argument("--compact-every",type=int,default=5); p.add_argument("--max-repairs",type=int,default=3); p.add_argument("--retrieve-top-k",type=int,default=8)
+    p.add_argument("--worker-output-tokens",type=int,default=8192,help="Maximum model output tokens per worker or repair turn (default: 8192)")
     p.add_argument("--single-task",action="store_true"); p.add_argument("--verify-tests-only",action="store_true"); p.add_argument("--resume",type=int); p.add_argument("--status",type=int); p.add_argument("--unsafe-shell",action="store_true"); p.add_argument("--no-auto-commit",action="store_true")
-    a=p.parse_args(); agent=Agent(Path(a.repo),BonsaiLLM(a.url,a.model),a.tests,a.max_steps,a.compact_every,a.max_repairs,a.retrieve_top_k,a.unsafe_shell,not a.no_auto_commit,a.verify_tests_only)
+    a=p.parse_args(); agent=Agent(Path(a.repo),BonsaiLLM(a.url,a.model),a.tests,a.max_steps,a.compact_every,a.max_repairs,a.retrieve_top_k,a.unsafe_shell,not a.no_auto_commit,a.verify_tests_only,a.worker_output_tokens)
     if a.status: print(json.dumps(agent.status(a.status),indent=2)); return
     if a.resume: rid=a.resume
     else:

@@ -164,3 +164,55 @@ def test_named_tool_choice_limits_available_tools(monkeypatch):
  BonsaiLLM().tool_turn([{"role":"user","content":"write"}],tool_choice={"type":"function","function":{"name":"write_file"}})
  assert seen["tool_choice"]=="required"
  assert [item["function"]["name"] for item in seen["tools"]]==["write_file"]
+
+
+def test_write_file_rejects_empty_and_preserves_existing(tmp_path):
+ import pytest
+ target=tmp_path/"module.py"
+ target.write_text("original\n")
+ w=WorkspaceTools(tmp_path)
+ for content in ("", "  \n  "):
+  with pytest.raises(ValueError,match="empty"):
+   w.write_file("module.py",content)
+  assert target.read_text()=="original\n"
+ assert not list(tmp_path.glob(".bonsai-write-*"))
+
+
+def test_write_file_atomically_replaces_and_preserves_mode(tmp_path):
+ target=tmp_path/"script.sh"
+ target.write_text("old\n")
+ target.chmod(0o755)
+ WorkspaceTools(tmp_path).write_file("script.sh","new\n")
+ assert target.read_text()=="new\n"
+ assert target.stat().st_mode & 0o777==0o755
+
+
+def test_length_finish_rejects_even_valid_write_arguments(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ class Response:
+  def raise_for_status(self): pass
+  def json(self):
+   return {"choices":[{"finish_reason":"length","message":{"tool_calls":[{"id":"c1","function":{"name":"write_file","arguments":'{"path":"module.py","content":"partial but valid"}'}}]}}]}
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",lambda *args,**kwargs: Response())
+ call=BonsaiLLM().tool_turn([{"role":"user","content":"write"}])["tool_calls"][0]
+ assert "max_tokens" in call["argument_error"]
+
+
+def test_worker_hands_off_after_changed_source_passes_configured_tests(tmp_path):
+ from bonsai_agent.agent import Agent
+ class FakeLLM:
+  def __init__(self): self.calls=0
+  def bind(self,observer): pass
+  def tool_turn(self,messages,**kwargs):
+   self.calls+=1
+   if self.calls==1:
+    return {"content":"","tool_calls":[{"id":"c1","name":"write_file","args":{"path":"app.py","content":"x=1\n"}}],"finish_reason":"tool_calls"}
+   return {"content":"","tool_calls":[{"id":"c2","name":"run_command","args":{"command":"true"}}],"finish_reason":"tool_calls"}
+ llm=FakeLLM(); agent=Agent(tmp_path,llm,tests="true",auto_commit=False)
+ rid=agent.db.create_run("task",str(tmp_path)); agent.db.add_task(rid,"task","task")
+ verified=[]
+ agent.verify=lambda *args: verified.append(True) or True
+ agent.execute_task(rid,agent.db.tasks(rid)[0],"task")
+ assert verified==[True]
+ assert llm.calls==2
+ assert (tmp_path/"app.py").read_text()=="x=1\n"

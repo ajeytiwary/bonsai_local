@@ -8,7 +8,9 @@ from .telemetry import Telemetry
 from .tools import WorkspaceTools
 
 class Agent:
-    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False):
+    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False,worker_output_tokens=8192):
+        if worker_output_tokens<1024: raise ValueError("worker_output_tokens must be at least 1024")
+        self.worker_output_tokens=worker_output_tokens
         self.root=Path(root).resolve(); self.llm=llm; self.tests=tests; self.max_steps=max_steps; self.compact_every=compact_every
         self.max_repairs=max_repairs; self.retrieve_top_k=retrieve_top_k; self.auto_commit=auto_commit; self.verify_tests_only=verify_tests_only
         self.db=StateDB(self.root/".agent/state.db"); self.tools=WorkspaceTools(self.root,unsafe_shell=unsafe_shell)
@@ -94,7 +96,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
             if step>=12 and not made_edit and "diff --git" in self.tools.git_diff():
                 made_edit=True
             choice={"type":"function","function":{"name":"write_file"}} if step>=12 and not made_edit else "auto"
-            turn=self.llm.tool_turn(messages,max_tokens=4096,temperature=.2,reasoning_budget=2048,tool_choice=choice)
+            turn=self.llm.tool_turn(messages,max_tokens=self.worker_output_tokens,temperature=.2,reasoning_budget=2048,tool_choice=choice)
             self.db.event(rid,task["id"],"worker_native",{"finish_reason":turn.get("finish_reason"),"content":turn.get("content","")[-2000:],"tool_calls":turn.get("tool_calls",[])})
             calls=turn.get("tool_calls") or []
             if not calls:
@@ -113,6 +115,11 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 if ok and name=="write_file": made_edit=True
                 self.db.log_tool(rid,task["id"],name,args,out,ok)
                 messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
+            if made_edit and any(c["name"] in ("run_tests","run_command") for c in calls):
+                tests=self.tools.run_tests(self.tests)
+                if tests.startswith("exit=0"):
+                    self.db.event(rid,task["id"],"worker_test_handoff",{"step":step+1})
+                    return self.verify(rid,task)
             # Keep the initial system/user pair exactly once. Drop complete
             # assistant/tool exchanges so no tool result is left orphaned.
             while len(messages)>12:
@@ -151,7 +158,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 self._role("repair",task["id"])
                 repair_messages=[{"role":"system","content":WORKER},{"role":"user","content":"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:]}]
                 for _ in range(4):
-                    turn=self.llm.tool_turn(repair_messages,max_tokens=4096,temperature=.2,reasoning_budget=0,tool_choice="required")
+                    turn=self.llm.tool_turn(repair_messages,max_tokens=self.worker_output_tokens,temperature=.2,reasoning_budget=0,tool_choice="required")
                     calls=turn.get("tool_calls") or []
                     if not calls: break
                     assistant={"role":"assistant","content":turn.get("content") or None,"tool_calls":[]}

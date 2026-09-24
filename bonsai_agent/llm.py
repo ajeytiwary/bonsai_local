@@ -54,6 +54,8 @@ class BonsaiLLM:
      error="Tool arguments must be a JSON object"; args={}
    except (TypeError,ValueError) as exc:
     args={}; error="Invalid or incomplete JSON tool arguments: "+str(exc)
+   if choice.get("finish_reason")=="length":
+    error="Model output hit max_tokens; tool call may be incomplete"
    call={"id":tc.get("id") or "call_"+str(len(calls)+1),"name":fn.get("name"),"args":args,"raw_arguments":raw if isinstance(raw,str) else json.dumps(raw)}
    if error: call["argument_error"]=error
    calls.append(call)

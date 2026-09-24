@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os,subprocess
+import os,subprocess,tempfile
 from pathlib import Path
 from .safety import CommandPolicy
 class WorkspaceTools:
@@ -10,7 +10,20 @@ class WorkspaceTools:
         return x
     def read_file(self,path,max_chars=30000): return self._path(path).read_text(errors="replace")[:max_chars]
     def write_file(self,path,content):
-        p=self._path(path); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(content); return "wrote "+str(p.relative_to(self.root))
+        if not isinstance(content,str) or not content.strip():
+            raise ValueError("refusing empty or whitespace-only file content")
+        p=self._path(path); p.parent.mkdir(parents=True,exist_ok=True)
+        fd,name=tempfile.mkstemp(prefix=".bonsai-write-",dir=p.parent)
+        try:
+            with os.fdopen(fd,"w") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(name,p.stat().st_mode & 0o777 if p.exists() else 0o644)
+            os.replace(name,p)
+        finally:
+            if os.path.exists(name): os.unlink(name)
+        return "wrote "+str(p.relative_to(self.root))
     def list_files(self,path=".",limit=500):
         out=[]
         for x in self._path(path).rglob("*"):
