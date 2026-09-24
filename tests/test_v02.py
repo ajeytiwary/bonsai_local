@@ -77,9 +77,25 @@ def test_structured_schema_is_sent(monkeypatch):
  assert x["verdict"]=="PASS"
  assert seen["response_format"]["type"]=="json_object"
  assert seen["response_format"]["schema"]["required"]==["verdict","reason","repair"]
- assert seen["json_schema"]==seen["response_format"]["schema"]
+ assert "json_schema" not in seen
 
 def test_plan_schema_bounds_tasks():
  from bonsai_agent.llm import SCHEMAS
  s=SCHEMAS["plan"]["properties"]["tasks"]
  assert s["minItems"]==1 and s["maxItems"]==6
+
+
+def test_json_retries_malformed_structured_output(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ replies=iter([
+  {"usage":{},"choices":[{"message":{"content":"I should use a tool"}}]},
+  {"usage":{},"choices":[{"message":{"content":'{"tool":"read_file","args":{"path":"app.py"}}'}}]},
+ ])
+ class R:
+  def __init__(self,x): self.x=x
+  def raise_for_status(self): pass
+  def json(self): return self.x
+ def post(url,json,timeout): return R(next(replies))
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
+ x=BonsaiLLM().json("s","u",expected="action",retries=1)
+ assert x["tool"]=="read_file"
