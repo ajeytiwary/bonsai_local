@@ -14,9 +14,9 @@ class BonsaiLLM:
  def chat(self,messages,max_tokens=3000,temperature=0.2,response_schema=None):
   payload={'model':self.model,'messages':messages,'temperature':temperature,'top_p':0.95,'max_tokens':max_tokens,'stream':False}
   if response_schema:
-   # llama.cpp currently documents schema-constrained chat output as json_object + schema.
+   # OpenAI-compatible structured output. Do not send a second, non-standard
+   # json_schema field: some llama.cpp forks ignore/conflict with it.
    payload['response_format']={'type':'json_object','schema':response_schema}
-   payload['json_schema']=response_schema # compatibility with older/forked servers
   start=time.perf_counter(); res=requests.post(self.url,json=payload,timeout=self.timeout); elapsed=time.perf_counter()-start
   res.raise_for_status(); data=res.json(); usage=data.get('usage') or {}; timings=data.get('timings') or {}
   if self.observer:self.observer({'role':self.role,'usage':usage,'timings':timings,'seconds':elapsed,'max_tokens':max_tokens,'temperature':temperature,'constrained':bool(response_schema)})
@@ -57,4 +57,10 @@ class BonsaiLLM:
  def json(self,system,user,max_tokens=800,expected=None,retries=0):
   schema=SCHEMAS.get(expected)
   text=self.chat([{'role':'system','content':system},{'role':'user','content':user}],max_tokens,0.0,response_schema=schema)
-  return self.parse_json(text,expected)
+  try:return self.parse_json(text,expected)
+  except ValueError:
+   if retries<=0:raise
+   # Compatibility fallback for servers/templates that failed to honor the schema.
+   repair='Return ONLY one compact JSON object matching this schema: '+json.dumps(schema,separators=(',',':'))+'\nPrevious output:\n'+text[-2500:]
+   text=self.chat([{'role':'system','content':'Output JSON only.'},{'role':'user','content':repair}],min(max_tokens,400),0.0,response_schema=schema)
+   return self.parse_json(text,expected)
