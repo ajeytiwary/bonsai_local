@@ -81,7 +81,12 @@ Use the available tools to implement the task. Inspect only what is needed, edit
         messages=[{"role":"system","content":WORKER},{"role":"user","content":prompt}]
         for _ in range(20):
             self._role("worker",task["id"])
-            turn=self.llm.tool_turn(messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
+            try:
+                turn=self.llm.tool_turn(messages,max_tokens=1800,temperature=.2,reasoning_budget=2048)
+            except Exception as e:
+                self.db.event(rid,task["id"],"worker_transport_error",{"error":repr(e)})
+                messages.append({"role":"user","content":"The previous model/tool round-trip failed at the inference transport layer. Re-evaluate the task from the available context and continue safely."})
+                continue
             self.db.event(rid,task["id"],"worker_native",{"finish_reason":turn.get("finish_reason"),"content":turn.get("content","")[-2000:],"tool_calls":turn.get("tool_calls",[])})
             calls=turn.get("tool_calls") or []
             if not calls:
@@ -122,7 +127,11 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
                 self._role("repair",task["id"])
                 repair_messages=[{"role":"system","content":WORKER},{"role":"user","content":"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:]}]
-                turn=self.llm.tool_turn(repair_messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
+                try:
+                    turn=self.llm.tool_turn(repair_messages,max_tokens=1800,temperature=.2,reasoning_budget=2048)
+                except Exception as e:
+                    self.db.event(rid,task["id"],"repair_transport_error",{"error":repr(e)})
+                    continue
                 for call in turn.get("tool_calls") or []:
                     try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
