@@ -82,7 +82,8 @@ RELEVANT REPOSITORY CONTEXT:
 RECENT OBSERVATIONS:
 {json.dumps(transcript[-5:],ensure_ascii=False)[:10000]}
 Choose one next action."""
-            self._role("worker",task["id"]); try:
+            self._role("worker",task["id"])
+            try:
                 action=self.llm.json(WORKER,prompt,650,expected="action",retries=1)
             except Exception as e:
                 # A malformed worker response is recoverable; record it as an
