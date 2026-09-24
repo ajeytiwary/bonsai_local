@@ -35,15 +35,28 @@ class BonsaiLLM:
   data=self._post(payload,max_tokens,temperature,bool(response_schema)); msg=data['choices'][0]['message']
   return msg.get('content') or msg.get('reasoning_content') or msg.get('reasoning') or ''
  def tool_turn(self,messages,max_tokens=900,temperature=0.2,reasoning_budget=2048,tools=None,tool_choice="auto"):
-  payload={'model':self.model,'messages':messages,'temperature':temperature,'top_p':0.95,'max_tokens':max_tokens,'stream':False,'tools':tools or TOOL_SCHEMAS,'tool_choice':tool_choice}
+  available_tools=tools or TOOL_SCHEMAS
+  if isinstance(tool_choice,dict):
+   name=(tool_choice.get("function") or {}).get("name")
+   available_tools=[item for item in available_tools if (item.get("function") or {}).get("name")==name]
+   if not available_tools: raise ValueError("Unknown required tool: "+str(name))
+   tool_choice="required"
+  payload={"model":self.model,"messages":messages,"temperature":temperature,"top_p":0.95,"max_tokens":max_tokens,"stream":False,"tools":available_tools,"tool_choice":tool_choice}
   if reasoning_budget is not None: payload['thinking_budget_tokens']=reasoning_budget
   data=self._post(payload,max_tokens,temperature,False); choice=data['choices'][0]; msg=choice.get('message') or {}
   calls=[]
   for tc in msg.get('tool_calls') or []:
    fn=tc.get('function') or {}; raw=fn.get('arguments') or '{}'
-   try: args=json.loads(raw) if isinstance(raw,str) else raw
-   except Exception: args={}
-   calls.append({'id':tc.get('id') or 'call_'+str(len(calls)+1),'name':fn.get('name'),'args':args})
+   error=None
+   try:
+    args=json.loads(raw) if isinstance(raw,str) else raw
+    if not isinstance(args,dict):
+     error="Tool arguments must be a JSON object"; args={}
+   except (TypeError,ValueError) as exc:
+    args={}; error="Invalid or incomplete JSON tool arguments: "+str(exc)
+   call={"id":tc.get("id") or "call_"+str(len(calls)+1),"name":fn.get("name"),"args":args,"raw_arguments":raw if isinstance(raw,str) else json.dumps(raw)}
+   if error: call["argument_error"]=error
+   calls.append(call)
   return {'content':msg.get('content') or '','reasoning_content':msg.get('reasoning_content') or msg.get('reasoning') or '','tool_calls':calls,'finish_reason':choice.get('finish_reason')}
  @staticmethod
  def _balanced(text,op='{',cl='}'):

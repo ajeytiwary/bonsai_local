@@ -78,26 +78,39 @@ class Agent:
 TASK: {task['title']}
 DESCRIPTION: {task['description']}
 ACCEPTANCE: {task['acceptance']}
+WORKSPACE ROOT: {self.root}
+Commands already run from this workspace root. Do not cd to guessed paths.
+CONFIGURED TEST COMMAND: {self.tests}
 CHECKPOINT: {checkpoint[-5000:]}
 RELEVANT REPOSITORY CONTEXT:
 {json.dumps(relevant,ensure_ascii=False)[:18000]}
 Use the available tools to implement the task. Inspect only what is needed, edit source files, run focused tests, and when implementation is complete return a normal assistant message with no tool call. Never modify benchmark tests."""
         messages=[{"role":"system","content":WORKER},{"role":"user","content":prompt}]
-        for _ in range(20):
+        made_edit=False
+        for step in range(20):
             self._role("worker",task["id"])
-            turn=self.llm.tool_turn(messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
+            if step==8 and not made_edit:
+                messages[1]["content"]+="\nProgress check: you have inspected the repository. Make the required source edit now. Use write_file with complete JSON arguments before running more tests."
+            if step>=12 and not made_edit and "diff --git" in self.tools.git_diff():
+                made_edit=True
+            choice={"type":"function","function":{"name":"write_file"}} if step>=12 and not made_edit else "auto"
+            turn=self.llm.tool_turn(messages,max_tokens=4096,temperature=.2,reasoning_budget=2048,tool_choice=choice)
             self.db.event(rid,task["id"],"worker_native",{"finish_reason":turn.get("finish_reason"),"content":turn.get("content","")[-2000:],"tool_calls":turn.get("tool_calls",[])})
             calls=turn.get("tool_calls") or []
             if not calls:
                 return self.verify(rid,task)
             assistant={"role":"assistant","content":turn.get("content") or None,"tool_calls":[]}
             for call in calls:
-                assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":json.dumps(call["args"],ensure_ascii=False)}})
+                assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":call.get("raw_arguments") or json.dumps(call["args"],ensure_ascii=False)}})
             messages.append(assistant)
             for call in calls:
                 name,args=call["name"],call["args"]
-                try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
-                except Exception as e: out="ERROR: "+repr(e); ok=False
+                if call.get("argument_error"):
+                    out="ERROR: "+call["argument_error"]+"; retry with complete JSON arguments"; ok=False
+                else:
+                    try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
+                    except Exception as e: out="ERROR: "+repr(e); ok=False
+                if ok and name=="write_file": made_edit=True
                 self.db.log_tool(rid,task["id"],name,args,out,ok)
                 messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
             # Keep the initial system/user pair exactly once. Drop complete
@@ -138,17 +151,20 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 self._role("repair",task["id"])
                 repair_messages=[{"role":"system","content":WORKER},{"role":"user","content":"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:]}]
                 for _ in range(4):
-                    turn=self.llm.tool_turn(repair_messages,max_tokens=1800,temperature=.2,reasoning_budget=0,tool_choice="required")
+                    turn=self.llm.tool_turn(repair_messages,max_tokens=4096,temperature=.2,reasoning_budget=0,tool_choice="required")
                     calls=turn.get("tool_calls") or []
                     if not calls: break
                     assistant={"role":"assistant","content":turn.get("content") or None,"tool_calls":[]}
                     for call in calls:
-                        assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":json.dumps(call["args"],ensure_ascii=False)}})
+                        assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":call.get("raw_arguments") or json.dumps(call["args"],ensure_ascii=False)}})
                     repair_messages.append(assistant)
                     changed=False
                     for call in calls:
-                        try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
-                        except Exception as e: out="ERROR: "+repr(e); ok=False
+                        if call.get("argument_error"):
+                            out="ERROR: "+call["argument_error"]+"; retry with complete JSON arguments"; ok=False
+                        else:
+                            try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
+                            except Exception as e: out="ERROR: "+repr(e); ok=False
                         self.db.log_tool(rid,task["id"],call["name"],call["args"],out,ok)
                         repair_messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
                         changed=changed or (ok and call["name"] in ("write_file","run_command"))

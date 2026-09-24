@@ -138,3 +138,29 @@ def test_native_tool_history_keeps_system_first(tmp_path):
  agent.verify=lambda *args: True
  agent.execute_task(rid,agent.db.tasks(rid)[0],"task")
  assert [m["role"] for m in llm.messages[1]]==["system","user","assistant","tool"]
+
+
+def test_truncated_native_tool_arguments_are_reported(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ class Response:
+  def raise_for_status(self): pass
+  def json(self):
+   return {"choices":[{"finish_reason":"length","message":{"tool_calls":[{"id":"c1","function":{"name":"write_file","arguments":"{\"path\":\"app.py\",\"content\":\"unfinished"}}]}}]}
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",lambda *args,**kwargs: Response())
+ call=BonsaiLLM().tool_turn([{"role":"user","content":"write"}])["tool_calls"][0]
+ assert "argument_error" in call
+ assert call["raw_arguments"].startswith('{"path":"app.py"')
+ assert call["args"]=={}
+
+
+def test_named_tool_choice_limits_available_tools(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ seen={}
+ class Response:
+  def raise_for_status(self): pass
+  def json(self): return {"choices":[{"message":{"content":"done"}}]}
+ def post(url,json,timeout): seen.update(json); return Response()
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
+ BonsaiLLM().tool_turn([{"role":"user","content":"write"}],tool_choice={"type":"function","function":{"name":"write_file"}})
+ assert seen["tool_choice"]=="required"
+ assert [item["function"]["name"] for item in seen["tools"]]==["write_file"]

@@ -31,6 +31,8 @@ def run_task(task,agent_cmd="bonsai-agent",timeout=1800,url="http://127.0.0.1:80
         start=time.time()
         env={**os.environ,"PATH":str(Path(sys.executable).parent)+os.pathsep+os.environ.get("PATH",""),
              "PYTHONDONTWRITEBYTECODE":"1","PYTEST_ADDOPTS":"-p no:cacheprovider"}
+        baseline=subprocess.run(task["test_command"],cwd=work,shell=True,text=True,capture_output=True,env=env)
+        baseline_failed=baseline.returncode!=0
         cmd=[agent_cmd,"--single-task","--verify-tests-only","--repo",str(work),"--url",url,"--model",model,"--tests",task["test_command"],task["objective"]]
         try:
             cp=subprocess.run(cmd,text=True,capture_output=True,timeout=timeout,env=env)
@@ -58,9 +60,9 @@ def run_task(task,agent_cmd="bonsai-agent",timeout=1800,url="http://127.0.0.1:80
         except Exception as e:
             state={"instrumentation_error":repr(e)}
         tests_pass=verify.returncode==0
-        clean=(agent_exit==0 and tests_pass and tests_unchanged and run_status=="complete" and bool(task_statuses) and all(s=="done" for s in task_statuses))
+        clean=(baseline_failed and agent_exit==0 and tests_pass and tests_unchanged and run_status=="complete" and bool(task_statuses) and all(s=="done" for s in task_statuses))
         return {"id":task["id"],"split":task["split"],"category":task.get("category"),"agent_exit":agent_exit,
-                "tests_pass":tests_pass,"tests_unchanged":tests_unchanged,"run_status":run_status,"task_statuses":task_statuses,
+                "tests_pass":tests_pass,"baseline_failed":baseline_failed,"baseline_stdout":baseline.stdout[-1000:],"baseline_stderr":baseline.stderr[-1000:],"tests_unchanged":tests_unchanged,"run_status":run_status,"task_statuses":task_statuses,
                 "clean":clean,"seconds":time.time()-start,**state,"git_status":status.stdout[-1000:],"test_stdout":verify.stdout[-2000:],
                 "test_stderr":verify.stderr[-2000:],"stdout":stdout,"stderr":stderr}
 

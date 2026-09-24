@@ -1,0 +1,12 @@
+{
+  "model": "bonsai-abliterated-mtp",
+  "workdir": "/tmp/bonsai-long-gate-Qr10ec",
+  "baseline_failed": true,
+  "agent_exit": 0,
+  "visible_tests_pass": true,
+  "hidden_tests_pass": true,
+  "tests_unchanged": true,
+  "source_changed": true,
+  "run_complete": true,
+  "clean": true
+}
