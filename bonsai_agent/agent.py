@@ -32,7 +32,7 @@ class Agent:
         if p.exists(): task_md=p.read_text(errors="replace")[:12000]
         plan_prompt="OBJECTIVE:\n"+objective+"\n\nTASK.md:\n"+task_md+"\n\nREPO MAP:\n"+self.retrieve.repo_map()
         try:
-            plan=self.llm.json(PLANNER,plan_prompt,700,expected="plan")
+            plan=self.llm.json(PLANNER,plan_prompt,700,expected="plan",reasoning_budget=2048)
         except Exception as e:
             # Planning must not make the whole coding run unusable. A single direct
             # implementation task is a safe deterministic fallback.
@@ -68,37 +68,36 @@ class Agent:
     def execute_task(self,rid,task,objective):
         self._role("worker",task["id"])
         self.db.update_task(task["id"],status="running",attempts=task["attempts"]+1)
-        transcript=[]
-        for _ in range(20):
-            relevant=self.retrieve.search(task["title"]+" "+task["description"],self.retrieve_top_k)
-            checkpoint=self.db.latest_checkpoint(rid)
-            prompt=f"""OBJECTIVE: {objective}
+        relevant=self.retrieve.search(task["title"]+" "+task["description"],self.retrieve_top_k)
+        checkpoint=self.db.latest_checkpoint(rid)
+        prompt=f"""OBJECTIVE: {objective}
 TASK: {task['title']}
 DESCRIPTION: {task['description']}
 ACCEPTANCE: {task['acceptance']}
 CHECKPOINT: {checkpoint[-5000:]}
 RELEVANT REPOSITORY CONTEXT:
 {json.dumps(relevant,ensure_ascii=False)[:18000]}
-RECENT OBSERVATIONS:
-{json.dumps(transcript[-5:],ensure_ascii=False)[:10000]}
-Choose one next action."""
+Use the available tools to implement the task. Inspect only what is needed, edit source files, run focused tests, and when implementation is complete return a normal assistant message with no tool call. Never modify benchmark tests."""
+        messages=[{"role":"system","content":WORKER},{"role":"user","content":prompt}]
+        for _ in range(20):
             self._role("worker",task["id"])
-            try:
-                action=self.llm.json(WORKER,prompt,650,expected="action",retries=1)
-            except Exception as e:
-                # A malformed worker response is recoverable; record it as an
-                # observation instead of crashing the entire benchmark case.
-                self.db.event(rid,task["id"],"worker_parse_error",{"error":repr(e)})
-                transcript.append({"tool":"worker_protocol","output":"Previous response was not a valid action object. Emit exactly one tool action with args, or done=true."})
-                continue
-            self.db.event(rid,task["id"],"worker",action)
-            if action.get("done"):
+            turn=self.llm.tool_turn(messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
+            self.db.event(rid,task["id"],"worker_native",{"finish_reason":turn.get("finish_reason"),"content":turn.get("content","")[-2000:],"tool_calls":turn.get("tool_calls",[])})
+            calls=turn.get("tool_calls") or []
+            if not calls:
                 return self.verify(rid,task)
-            name,args=action.get("tool"),action.get("args",{})
-            try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
-            except Exception as e: out="ERROR: "+repr(e); ok=False
-            self.db.log_tool(rid,task["id"],name,args,out,ok); transcript.append({"tool":name,"output":out[-8000:]})
-        self.db.update_task(task["id"],status="failed",result="worker step budget exhausted")
+            assistant={"role":"assistant","content":turn.get("content") or None,"tool_calls":[]}
+            for call in calls:
+                assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":json.dumps(call["args"],ensure_ascii=False)}})
+            messages.append(assistant)
+            for call in calls:
+                name,args=call["name"],call["args"]
+                try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
+                except Exception as e: out="ERROR: "+repr(e); ok=False
+                self.db.log_tool(rid,task["id"],name,args,out,ok)
+                messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
+            messages=messages[:2]+messages[-10:]
+        self.db.update_task(task["id"],status="failed",result="native tool-call step budget exhausted")
 
     def verify(self,rid,task):
         for repair in range(self.max_repairs+1):
@@ -106,7 +105,7 @@ Choose one next action."""
             evidence=f"TASK:{json.dumps(task)}\nTESTS:\n{tests[-16000:]}\nDIFF:\n{diff[-24000:]}"
             self._role("verifier",task["id"])
             try:
-                verdict=self.llm.json(VERIFIER,evidence,350,expected="verdict")
+                verdict=self.llm.json(VERIFIER,evidence,350,expected="verdict",reasoning_budget=512)
             except Exception as e:
                 self.db.event(rid,task["id"],"verifier_fallback",{"error":repr(e)})
                 verdict={"verdict":"PASS" if tests.startswith("exit=0") else "FAIL","reason":"Deterministic fallback from external test exit status after structured verifier failure.","repair":"Fix the failing configured tests."}
@@ -121,11 +120,13 @@ Choose one next action."""
                 self.db.update_task(task["id"],status="blocked",result=verdict.get("reason","")); return False
             if repair<self.max_repairs:
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
-                self._role("repair",task["id"]); action=self.llm.json(WORKER,"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:],650,expected="action",retries=1)
-                if action.get("tool"):
-                    try: out=self.tools.execute(action["tool"],action.get("args",{})); ok=not out.startswith("BLOCKED:")
+                self._role("repair",task["id"])
+                repair_messages=[{"role":"system","content":WORKER},{"role":"user","content":"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:]}]
+                turn=self.llm.tool_turn(repair_messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
+                for call in turn.get("tool_calls") or []:
+                    try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
-                    self.db.log_tool(rid,task["id"],action["tool"],action.get("args",{}),out,ok)
+                    self.db.log_tool(rid,task["id"],call["name"],call["args"],out,ok)
         self.db.update_task(task["id"],status="failed",result="verification/repair budget exhausted"); return False
 
     def compact(self,rid,objective):
