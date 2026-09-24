@@ -8,9 +8,9 @@ from .telemetry import Telemetry
 from .tools import WorkspaceTools
 
 class Agent:
-    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True):
+    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False):
         self.root=Path(root).resolve(); self.llm=llm; self.tests=tests; self.max_steps=max_steps; self.compact_every=compact_every
-        self.max_repairs=max_repairs; self.retrieve_top_k=retrieve_top_k; self.auto_commit=auto_commit
+        self.max_repairs=max_repairs; self.retrieve_top_k=retrieve_top_k; self.auto_commit=auto_commit; self.verify_tests_only=verify_tests_only
         self.db=StateDB(self.root/".agent/state.db"); self.tools=WorkspaceTools(self.root,unsafe_shell=unsafe_shell)
         self.retrieve=RepoRetriever(self.root)
         self._rid=None; self._tid=None
@@ -25,14 +25,18 @@ class Agent:
         self._tid=tid
         if hasattr(self.llm,"role"): self.llm.role=role
 
-    def start(self,objective):
+    def start(self,objective,single_task=False):
         rid=self.db.create_run(objective,str(self.root)); self._rid=rid; self._role("planner")
         task_md=""
         p=self.root/"TASK.md"
         if p.exists(): task_md=p.read_text(errors="replace")[:12000]
+        if single_task:
+            self.db.add_task(rid,"Complete TASK.md acceptance task",objective+"\nTASK.md:\n"+task_md,"Complete TASK.md requirements; configured tests pass and benchmark tests remain unchanged.")
+            self.db.event(rid,None,"plan",{"mode":"single_task"})
+            return rid
         plan_prompt="OBJECTIVE:\n"+objective+"\n\nTASK.md:\n"+task_md+"\n\nREPO MAP:\n"+self.retrieve.repo_map()
         try:
-            plan=self.llm.json(PLANNER,plan_prompt,700,expected="plan",reasoning_budget=2048)
+            plan=self.llm.json(PLANNER,plan_prompt,1200,expected="plan",retries=1,reasoning_budget=0)
         except Exception as e:
             # Planning must not make the whole coding run unusable. A single direct
             # implementation task is a safe deterministic fallback.
@@ -57,7 +61,7 @@ class Agent:
                 if not task: break
                 self.execute_task(rid,task,run["objective"]); completed+=1
                 if completed%self.compact_every==0: self.compact(rid,run["objective"])
-            remaining=[t for t in self.db.tasks(rid) if t["status"] not in ("done","blocked")]
+            remaining=[t for t in self.db.tasks(rid) if t["status"]!="done"]
             self.db.set_run_status(rid,"complete" if not remaining else "paused")
         except KeyboardInterrupt:
             self.db.set_run_status(rid,"paused"); raise
@@ -108,10 +112,15 @@ Use the available tools to implement the task. Inspect only what is needed, edit
     def verify(self,rid,task):
         for repair in range(self.max_repairs+1):
             tests=self.tools.run_tests(self.tests); diff=self.tools.git_diff()
-            evidence=f"TASK:{json.dumps(task)}\nTESTS:\n{tests[-16000:]}\nDIFF:\n{diff[-24000:]}"
+            evidence=f"TASK:{json.dumps(task)}\nTESTS:\n{tests[-5000:]}\nDIFF:\n{diff[-10000:]}"
             self._role("verifier",task["id"])
             try:
-                verdict=self.llm.json(VERIFIER,evidence,350,expected="verdict",reasoning_budget=512)
+                if self.verify_tests_only:
+                    verdict={"verdict":"PASS" if tests.startswith("exit=0") else "FAIL",
+                             "reason":"Configured acceptance tests passed." if tests.startswith("exit=0") else "Configured acceptance tests failed.",
+                             "repair":"Fix the configured acceptance tests."}
+                else:
+                    verdict=self.llm.json(VERIFIER,evidence,2048,expected="verdict",retries=1,reasoning_budget=0)
             except Exception as e:
                 self.db.event(rid,task["id"],"verifier_fallback",{"error":repr(e)})
                 verdict={"verdict":"BLOCKED","reason":"Structured verifier failed: "+repr(e),"repair":"Retry verification when the model is available."}
@@ -128,11 +137,22 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 repair_task={"title":task["title"],"description":verdict.get("repair","Repair failed verification"),"acceptance":task["acceptance"]}
                 self._role("repair",task["id"])
                 repair_messages=[{"role":"system","content":WORKER},{"role":"user","content":"REPAIR:\n"+json.dumps(repair_task)+"\nEVIDENCE:\n"+evidence[-24000:]}]
-                turn=self.llm.tool_turn(repair_messages,max_tokens=900,temperature=.2,reasoning_budget=2048)
-                for call in turn.get("tool_calls") or []:
-                    try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
-                    except Exception as e: out="ERROR: "+repr(e); ok=False
-                    self.db.log_tool(rid,task["id"],call["name"],call["args"],out,ok)
+                for _ in range(4):
+                    turn=self.llm.tool_turn(repair_messages,max_tokens=1800,temperature=.2,reasoning_budget=0,tool_choice="required")
+                    calls=turn.get("tool_calls") or []
+                    if not calls: break
+                    assistant={"role":"assistant","content":turn.get("content") or None,"tool_calls":[]}
+                    for call in calls:
+                        assistant["tool_calls"].append({"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":json.dumps(call["args"],ensure_ascii=False)}})
+                    repair_messages.append(assistant)
+                    changed=False
+                    for call in calls:
+                        try: out=self.tools.execute(call["name"],call["args"]); ok=not out.startswith("BLOCKED:")
+                        except Exception as e: out="ERROR: "+repr(e); ok=False
+                        self.db.log_tool(rid,task["id"],call["name"],call["args"],out,ok)
+                        repair_messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
+                        changed=changed or (ok and call["name"] in ("write_file","run_command"))
+                    if changed: break
         self.db.update_task(task["id"],status="failed",result="verification/repair budget exhausted"); return False
 
     def compact(self,rid,objective):

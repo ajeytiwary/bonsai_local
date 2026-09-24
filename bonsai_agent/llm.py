@@ -34,8 +34,8 @@ class BonsaiLLM:
   if response_schema: payload['response_format']={'type':'json_object','schema':response_schema}
   data=self._post(payload,max_tokens,temperature,bool(response_schema)); msg=data['choices'][0]['message']
   return msg.get('content') or msg.get('reasoning_content') or msg.get('reasoning') or ''
- def tool_turn(self,messages,max_tokens=900,temperature=0.2,reasoning_budget=2048,tools=None):
-  payload={'model':self.model,'messages':messages,'temperature':temperature,'top_p':0.95,'max_tokens':max_tokens,'stream':False,'tools':tools or TOOL_SCHEMAS,'tool_choice':'auto'}
+ def tool_turn(self,messages,max_tokens=900,temperature=0.2,reasoning_budget=2048,tools=None,tool_choice="auto"):
+  payload={'model':self.model,'messages':messages,'temperature':temperature,'top_p':0.95,'max_tokens':max_tokens,'stream':False,'tools':tools or TOOL_SCHEMAS,'tool_choice':tool_choice}
   if reasoning_budget is not None: payload['thinking_budget_tokens']=reasoning_budget
   data=self._post(payload,max_tokens,temperature,False); choice=data['choices'][0]; msg=choice.get('message') or {}
   calls=[]
@@ -85,5 +85,5 @@ class BonsaiLLM:
   except ValueError:
    if retries<=0:raise
    repair='Return ONLY one compact JSON object matching this schema: '+json.dumps(schema,separators=(',',':'))+'\nPrevious output:\n'+text[-2500:]
-   text=self.chat([{'role':'system','content':'Output JSON only.'},{'role':'user','content':repair}],min(max_tokens,400),0.0,response_schema=schema,reasoning_budget=512)
+   text=self.chat([{'role':'system','content':'Output JSON only.'},{'role':'user','content':repair}],max_tokens,0.0,response_schema=schema,reasoning_budget=0)
    return self.parse_json(text,expected)

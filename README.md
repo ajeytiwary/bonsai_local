@@ -254,3 +254,9 @@ The frozen split is 24 train / 8 validation / 8 held-out test. Never tune on tes
 Resume after interruption with `bonsai-agent --repo ~/git/my_project --resume 3`; inspect with `--status 3`. Verified tasks commit automatically only after tests exit 0 and the verifier returns PASS. GPU samples go to `.agent/telemetry-<run>.csv`.
 
 Install optimization support with `pip install -e '.[evolution]'`. Export evidence using `bonsai-evolve --export-gepa val.json --out gepa-dataset.json`. See `docs/EVOLUTION.md`.
+
+### Validation gate
+
+Regenerate the local fixtures after editing `benchmarks/generate_fixtures.py`, then run `bonsai-bench --split val --out validation.json` against a healthy local model server. The eight validation fixtures are single acceptance tasks. The runner calls the agent with `--single-task --verify-tests-only`; normal CLI runs still use model planning and model verification.
+
+A benchmark case is clean only when the agent exits successfully, its run and all tasks finish, the configured tests pass, and the original benchmark test files are unchanged. Every validation fixture fails its test before the agent runs. Generated Python and pytest caches are excluded from benchmark commits. Treat 8/8 clean validation cases as the first reliability gate before performance tuning.

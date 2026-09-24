@@ -30,7 +30,7 @@ class WorkspaceTools:
     def verified_commit(self,message):
         status=self.git_status()
         if status.startswith("exit=0") and not status.split("STDOUT:\n",1)[-1].split("\nSTDERR:",1)[0].strip(): return "no changes to commit"
-        a=self.run_command("git add -A -- . ':!.agent'")
+        a=self.run_command("git add -A -- . ':!.agent' ':!**/__pycache__' ':!**/*.pyc' ':!.pytest_cache'")
         if not a.startswith("exit=0"): return "commit skipped: "+a[-500:]
         c=self.run_command("git -c user.name='Bonsai Agent' -c user.email='bonsai@local' commit -m "+subprocess.list2cmdline([message]))
         return c[-1000:]

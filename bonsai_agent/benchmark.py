@@ -29,8 +29,9 @@ def run_task(task,agent_cmd="bonsai-agent",timeout=1800,url="http://127.0.0.1:80
         subprocess.run(["git","add","."],cwd=work,check=True)
         subprocess.run(["git","-c","user.email=bench@local","-c","user.name=Bonsai Bench","commit","-qm","fixture"],cwd=work,check=True)
         start=time.time()
-        env={**os.environ,"PATH":str(Path(sys.executable).parent)+os.pathsep+os.environ.get("PATH","")}
-        cmd=[agent_cmd,"--repo",str(work),"--url",url,"--model",model,"--tests",task["test_command"],task["objective"]]
+        env={**os.environ,"PATH":str(Path(sys.executable).parent)+os.pathsep+os.environ.get("PATH",""),
+             "PYTHONDONTWRITEBYTECODE":"1","PYTEST_ADDOPTS":"-p no:cacheprovider"}
+        cmd=[agent_cmd,"--single-task","--verify-tests-only","--repo",str(work),"--url",url,"--model",model,"--tests",task["test_command"],task["objective"]]
         try:
             cp=subprocess.run(cmd,text=True,capture_output=True,timeout=timeout,env=env)
             agent_exit=cp.returncode; stdout=cp.stdout[-4000:]; stderr=cp.stderr[-4000:]
