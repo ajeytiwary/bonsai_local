@@ -99,3 +99,20 @@ def test_json_retries_malformed_structured_output(monkeypatch):
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().json("s","u",expected="action",retries=1)
  assert x["tool"]=="read_file"
+
+
+def test_native_tool_call_parsing(monkeypatch):
+ from bonsai_agent.llm import BonsaiLLM
+ seen={}
+ class R:
+  def raise_for_status(self): pass
+  def json(self): return {"usage":{},"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\\\"path\\\":\\\"app.py\\\",\\\"content\\\":\\\"x=1\\\"}"}}]}}]}
+ def post(url,json,timeout): seen.update(json); return R()
+ monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
+ x=BonsaiLLM().tool_turn([{"role":"user","content":"fix it"}])
+ assert x["finish_reason"]=="tool_calls"
+ assert x["tool_calls"][0]["name"]=="write_file"
+ assert x["tool_calls"][0]["args"]["path"]=="app.py"
+ assert seen["tool_choice"]=="auto"
+ assert any(t["function"]["name"]=="run_tests" for t in seen["tools"])
+ assert seen["thinking_budget_tokens"]==2048
