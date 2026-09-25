@@ -2,6 +2,9 @@
 set -euo pipefail
 : "${BONSAI_MTP_DIR:?Set BONSAI_MTP_DIR to the directory containing the MTP GGUF}"
 LLAMA_SERVER="${LLAMA_SERVER:-llama-server}"
+MODEL_DIR="${MODEL_DIR:-/media/plasmion/Models/ternary_bonsai}"
+BONSAI_MTP_DIR="$MODEL_DIR/abli/mtp/Ternary-Bonsai-2-27B-Abliterated-PQ2_0-MTP.gguf|bonsai-abliterated-mtp|--reasoning off --reasoning-budget 0 --spec-type draft-mtp --spec-draft-n-max 2"
+
 MODEL="${BONSAI_MTP_DIR%/}/Ternary-Bonsai-2-27B-Abliterated-PQ2_0-MTP.gguf"
 PORT="${PORT:-8091}"
 CONTEXT="${CONTEXT:-16384}"

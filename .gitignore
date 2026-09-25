@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 .agent/
 .bonsai/
+.logs/
+.env
 benchmark-results*.json
 train.json
 val.json

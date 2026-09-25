@@ -91,17 +91,17 @@ bonsai-agent \
   --repo ~/git/my_project \
   --url http://127.0.0.1:8091 \
   --model Ternary-Bonsai-2-27B-PQ2_0 \
-  --test "pytest -q" \
+  --tests "pytest -q" \
   "Add a health endpoint, tests, and documentation"
 ```
 
 State is stored by default in:
 
 ```text
-<target repo>/.bonsai/agent.db
+<target repo>/.agent/state.db
 ```
 
-Add `.bonsai/` to the target repository's `.gitignore`.
+Add `.agent/` to the target repository's `.gitignore`.
 
 You can also run without installing the console script:
 
@@ -113,7 +113,7 @@ python -m bonsai_local.cli --repo ~/git/my_project "your objective"
 
 ### 1. Planning
 
-The planner receives the objective plus repository tree and emits 3–12 bounded tasks. Every task has a title, implementation description, and acceptance criteria. The plan is persisted before execution starts.
+The planner receives the objective plus repository tree and emits up to six bounded tasks. Every task has a title, implementation description, and acceptance criteria. The plan is persisted before execution starts.
 
 ### 2. Durable SQLite state
 
@@ -143,7 +143,7 @@ Failed verification generates explicit repair instructions. The worker receives 
 
 ### 6. Context compaction
 
-Every three completed tasks, the model creates a checkpoint that preserves decisions, interfaces, failures, and remaining work. Later calls use that checkpoint rather than replaying the entire history.
+Every five completed tasks, the model creates a checkpoint that preserves decisions, interfaces, failures, and remaining work. Later calls use that checkpoint rather than replaying the entire history.
 
 This is the central long-horizon design: **external state grows; model context stays bounded**.
 
@@ -155,30 +155,29 @@ bonsai-agent [options] OBJECTIVE...
 --repo PATH          target repository (default: .)
 --url URL            llama.cpp base URL
 --model NAME         model identifier
---db PATH            SQLite state path (default: .bonsai/agent.db)
---test COMMAND       verification test command (default: pytest -q)
---max-steps N        worker iterations per task (default: 20)
+--tests COMMAND       verification test command (default: pytest -q)
+--max-steps N        task attempts per run (default: 100)
 --max-repairs N      verification repair rounds (default: 3)
 ```
 
 For a Node project:
 
 ```bash
-bonsai-agent --repo ~/git/app --test "npm test" "Implement tenant-aware project CRUD"
+bonsai-agent --repo ~/git/app --tests "bun test" "Implement tenant-aware project CRUD"
 ```
 
 For a mixed project:
 
 ```bash
 bonsai-agent --repo ~/git/app \
-  --test "python -m pytest -q && npm test" \
+  --tests "pytest -q && bun test" \
   "Implement the feature and make all existing tests pass"
 ```
 
 ## Inspecting a run
 
 ```bash
-sqlite3 ~/git/my_project/.bonsai/agent.db
+sqlite3 ~/git/my_project/.agent/state.db
 ```
 
 Useful queries:
@@ -213,7 +212,7 @@ Start with a clean branch/worktree:
 ```bash
 git checkout -b bonsai/feature
 pytest -q
-bonsai-agent --repo . --test "pytest -q" \
+bonsai-agent --repo . --tests "pytest -q" \
   "Implement <specific objective>. Preserve compatibility and add tests."
 ```
 
@@ -233,7 +232,7 @@ While it runs, inspect SQLite events and Git changes in another terminal. For ve
 
 ## Current limitations
 
-This first version is intentionally small. Shell execution is not container-sandboxed. Resume-from-existing-run, dependency graphs, semantic repository retrieval, streaming reasoning capture, token/cost telemetry, automatic Git commits/worktrees, and human approval gates for destructive commands are natural next additions.
+Shell execution is not container-sandboxed. The command policy is a denylist, not a security boundary. The default model planner and verifier have not passed a repeatable day-to-day reliability gate; supervise runs, review commits, and use a dedicated worktree. The eight-case validation gate uses test-backed verification rather than the default model verifier.
 
 The runner should be treated as an engineering foundation rather than an unattended production deployment.
 
@@ -267,3 +266,59 @@ The frozen split is 24 train / 8 validation / 8 held-out test. Never tune on tes
 Resume after interruption with `bonsai-agent --repo ~/git/my_project --resume 3`; inspect with `--status 3`. Verified tasks commit automatically only after tests exit 0 and the verifier returns PASS. GPU samples go to `.agent/telemetry-<run>.csv`.
 
 Install optimization support with `pip install -e '.[evolution]'`. Export evidence using `bonsai-evolve --export-gepa val.json --out gepa-dataset.json`. See `docs/EVOLUTION.md`.
+
+### Validation gate
+
+Regenerate the local fixtures after editing `benchmarks/generate_fixtures.py`, then run `bonsai-bench --split val --out validation.json` against a healthy local model server. The eight validation fixtures are single acceptance tasks. The runner calls the agent with `--single-task --verify-tests-only`; normal CLI runs still use model planning and model verification.
+
+A benchmark case is clean only when the agent exits successfully, its run and all tasks finish, the configured tests pass, and the original benchmark test files are unchanged. Every validation fixture fails its test before the agent runs. Generated Python and pytest caches are excluded from benchmark commits. Treat 8/8 clean validation cases as the first reliability gate before performance tuning.
+
+### Abliterated Bonsai deployment
+
+The abliterated PQ2_0 model has a separate launcher at `scripts/run_bonsai_abliterated.sh`. Set `BONSAI_MODEL_DIR` to the directory containing `Ternary-Bonsai-2-27B-Abliterated-PQ2_0.gguf` and `LLAMA_SERVER` to the llama.cpp server binary, then run the script. It binds to `127.0.0.1:8091` by default and serves model alias `bonsai-abliterated`.
+
+```bash
+BONSAI_MODEL_DIR=/path/to/abliterated/files \
+LLAMA_SERVER=/path/to/llama-server \
+./scripts/run_bonsai_abliterated.sh
+```
+
+Run the stock and abliterated deployments sequentially when one GPU cannot hold both. The abliterated launcher uses the regular GGUF with thinking off. It does not enable the MTP head or speculative decoding. The MTP GGUF needs a patched runtime and has its own validation results below.
+
+```bash
+bonsai-agent --repo /path/to/project --model bonsai-abliterated --tests 'pytest -q' \
+  'Implement a specific, testable change'
+```
+
+The stock and abliterated models each completed all eight validation fixtures in one sequential run on this workstation. This is a narrow coding benchmark: it uses `--single-task --verify-tests-only`, and does not validate the default model planner and verifier for longer daily work. Use a dedicated Git branch or worktree, keep the target test command explicit, and review each result and commit.
+
+### Abliterated MTP deployment
+
+The optional MTP launcher is `scripts/run_bonsai_abliterated_mtp.sh`. It uses the MTP GGUF, thinking off, and `--spec-type draft-mtp --spec-draft-n-max 2`. Set `BONSAI_MTP_DIR` to the directory containing the MTP GGUF and `LLAMA_SERVER` to a PrismML llama.cpp build with the Qwen3.5 MTP Hadamard inverse fix. The local checkout used for validation already includes that fix, so the supplied patch must not be applied again.
+
+```bash
+BONSAI_MTP_DIR=/path/to/mtp/files \
+LLAMA_SERVER=/path/to/patched/llama-server \
+./scripts/run_bonsai_abliterated_mtp.sh
+
+bonsai-agent --repo /path/to/project --model bonsai-abliterated-mtp \
+  --tests 'pytest -q' 'Implement a specific, testable change'
+```
+
+Run the regular and MTP deployments sequentially on a GPU that cannot hold both. The MTP deployment completed all eight validation fixtures in one run; longer-project reliability is assessed separately.
+
+### Long-project reliability gate
+
+`benchmarks/long_projects/run_gate.sh` copies this repository into a disposable workspace and asks the normal planner, worker, and model verifier to implement server model auto-discovery across the client and CLI. The acceptance baseline must fail; visible and hidden behavioral tests, source changes, unchanged tests, and completed task state are required for a clean result. Set `MODEL_ALIAS` to test another deployment and `RESULT_PATH` to retain its report.
+
+```bash
+MODEL_ALIAS=bonsai-abliterated-mtp ./benchmarks/long_projects/run_gate.sh
+```
+
+The MTP deployment produced one clean end-to-end long-project run on 2026-09-24, recorded in `benchmarks/results/long-project-gate.json`. Earlier exploratory runs failed when the worker exhausted its tool calls or the test harness imported the wrong project copy. One clean run is useful evidence, but repeatable reliability for unfamiliar day-to-day projects remains unproven; run this gate repeatedly and supervise real work before relying on unattended edits.
+
+### Large worker edits and safe file writes
+
+Worker and repair calls default to 8192 output tokens. Use `--worker-output-tokens 12288` for a task that needs larger whole-file writes, while keeping the server context large enough for both the prompt and the response (`CONTEXT` in the launcher defaults to 16384). Raising this limit does not improve the model's coding judgment; it only gives a valid tool call room to finish.
+
+The client rejects malformed tool arguments and any tool call whose response ended because it hit `max_tokens`. `write_file` also rejects empty or whitespace-only content and replaces files atomically, preserving existing permissions. These guards protect direct `write_file` calls; commands run through `run_command` still need review because shell redirection can write files independently.
