@@ -61,11 +61,46 @@ command -v bonsai-bench >/dev/null 2>&1 || fail "bonsai-bench console script mis
 
 # Optional: Hermes harness (execution layer). Opt-in via INSTALL_HERMES=1 because
 # it is an external package with its own upgrade cadence.
+# Resolution (recorded): hermes-agent requires Python >= 3.11 but the project
+# venv may be 3.10 (package floor). Hermes therefore gets its own interpreter
+# at .venv-hermes (project-local, never system-wide): created from python3 when
+# the venv interpreter is < 3.11, otherwise reused from .venv.
 if [[ "${INSTALL_HERMES:-0}" == "1" ]]; then
   log "installing hermes-agent (INSTALL_HERMES=1)"
-  python -m pip install --quiet -U hermes-agent
-  command -v hermes >/dev/null 2>&1 && log "hermes: $(hermes --version 2>/dev/null | head -1)" \
-    || log "WARN: hermes console script not found after install"
+  HERMES_VENV="$ROOT/.venv-hermes"
+  VENV_PY_MAJOR="$(python -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+  HERMES_NEEDS_OWN_VENV=0
+  VENV_PY_MINOR="${VENV_PY_MAJOR#*.}"
+  [[ "$VENV_PY_MAJOR" == "3" && "$VENV_PY_MINOR" -lt 11 ]] && HERMES_NEEDS_OWN_VENV=1
+
+  if [[ "$HERMES_NEEDS_OWN_VENV" == "1" ]]; then
+    log "venv python is $VENV_PY_MAJOR (< 3.11, hermes-agent needs >= 3.11) — using $HERMES_VENV"
+    HERMES_PY="$PYTHON"
+    "$HERMES_PY" - <<'EOF' || HERMES_PY=""
+import sys
+sys.exit(0 if sys.version_info >= (3, 11) else 1)
+EOF
+    [[ -z "$HERMES_PY" ]] && fail "no Python >= 3.11 available for hermes-agent (install python3.11+)"
+    [[ -d "$HERMES_VENV" ]] || { log "creating .venv-hermes"; "$HERMES_PY" -m venv "$HERMES_VENV"; }
+    # shellcheck disable=SC1091
+    source "$HERMES_VENV/bin/activate"
+    python -m pip install --quiet --upgrade pip
+    python -m pip install --quiet -U hermes-agent
+    HERMES_BIN="$HERMES_VENV/bin/hermes"
+    deactivate 2>/dev/null || true
+    # Restore the project venv for the rest of the script.
+    # shellcheck disable=SC1091
+    source "$ROOT/.venv/bin/activate"
+  else
+    python -m pip install --quiet -U hermes-agent
+    HERMES_BIN="$(command -v hermes || true)"
+  fi
+
+  if [[ -n "${HERMES_BIN:-}" && -x "$HERMES_BIN" ]]; then
+    log "hermes: $("$HERMES_BIN" --version 2>/dev/null | head -1) at $HERMES_BIN"
+  else
+    log "WARN: hermes console script not found after install"
+  fi
 else
   log "skipping hermes-agent install (set INSTALL_HERMES=1 to install)"
 fi

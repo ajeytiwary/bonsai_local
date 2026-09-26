@@ -7,6 +7,9 @@ from .retrieval import RepoRetriever
 from .telemetry import Telemetry
 from .tools import WorkspaceTools
 
+# tools that constitute a source edit (made_edit / repair loop tracking)
+EDIT_TOOLS=("write_file","replace_in_file","apply_patch","create_file")
+
 class Agent:
     def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False,worker_output_tokens=8192):
         if worker_output_tokens<1024: raise ValueError("worker_output_tokens must be at least 1024")
@@ -92,7 +95,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
         for step in range(20):
             self._role("worker",task["id"])
             if step==8 and not made_edit:
-                messages[1]["content"]+="\nProgress check: you have inspected the repository. Make the required source edit now. Use write_file with complete JSON arguments before running more tests."
+                messages[1]["content"]+="\nProgress check: you have inspected the repository. Make the required source edit now. Prefer replace_in_file (exact old/new) or apply_patch (unified diff) for localized changes; use write_file only for full rewrites or create_file for new files."
             if step>=12 and not made_edit and "diff --git" in self.tools.git_diff():
                 made_edit=True
             choice={"type":"function","function":{"name":"write_file"}} if step>=12 and not made_edit else "auto"
@@ -112,7 +115,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 else:
                     try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
                     except Exception as e: out="ERROR: "+repr(e); ok=False
-                if ok and name=="write_file": made_edit=True
+                if ok and name in EDIT_TOOLS: made_edit=True
                 self.db.log_tool(rid,task["id"],name,args,out,ok)
                 messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
             if made_edit and any(c["name"] in ("run_tests","run_command") for c in calls):
@@ -174,7 +177,7 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                             except Exception as e: out="ERROR: "+repr(e); ok=False
                         self.db.log_tool(rid,task["id"],call["name"],call["args"],out,ok)
                         repair_messages.append({"role":"tool","tool_call_id":call["id"],"content":out[-12000:]})
-                        changed=changed or (ok and call["name"] in ("write_file","run_command"))
+                        changed=changed or (ok and call["name"] in (*EDIT_TOOLS,"run_command"))
                     if changed: break
         self.db.update_task(task["id"],status="failed",result="verification/repair budget exhausted"); return False
 

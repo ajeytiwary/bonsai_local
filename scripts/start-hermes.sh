@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
-# Start the Hermes execution harness (gateway mode) against local Bonsai.
+# Start the Hermes execution harness against local Bonsai.
 # Generates the Hermes env file on first run; all values overridable via .env.
+#
+# Resolution notes (recorded per SPEC — installed help/source inspected):
+#   * hermes CLI may live in project-local .venv-hermes (hermes-agent needs
+#     Python >= 3.11; project venv can be 3.10) — look there first, then PATH.
+#   * The 8642 API server is the gateway's `api_server` platform adapter
+#     (gateway/platforms/api_server.py DEFAULT_PORT=8642), enabled by env vars
+#     API_SERVER_ENABLED / API_SERVER_KEY (gateway/config.py). It is NOT
+#     `hermes serve` (9119 JSON-RPC) — we start `hermes gateway run`.
+#   * Model routing (provider=custom -> Bonsai /v1) lives in ~/.hermes/config.yaml,
+#     set idempotently below via `hermes config set`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,15 +21,27 @@ cd "$ROOT"
 BONSAI_URL="${BONSAI_URL:-${BONSAI_BASE_URL:-http://127.0.0.1:8091}/v1}"
 HERMES_PORT="${HERMES_PORT:-8642}"
 HERMES_KEY="${HERMES_KEY:-bonsai-local}"
+# gateway/platforms/api_server.py refuses placeholder/short keys (<16 chars)
+# because the endpoint dispatches terminal-capable agent work.
+if [[ ${#HERMES_KEY} -lt 16 || "$HERMES_KEY" == "bonsai-local" ]]; then
+  echo "ERROR: HERMES_KEY must be a strong secret (>=16 chars, not the placeholder)." >&2
+  echo "Generate one:  openssl rand -hex 32   (set HERMES_KEY in .env)" >&2
+  exit 1
+fi
 ENVFILE="${HERMES_ENV:-${HERMES_ENV_FILE:-$HOME/.hermes/.env.bonsai-local}}"
 MODEL_ID="${BONSAI_MODEL_ID:-Ternary-Bonsai-2-27B-PQ2_0}"
 
-if ! command -v hermes >/dev/null 2>&1; then
+# Locate the hermes binary: project venv first (bootstrap's resolution), then PATH.
+HERMES_BIN=""
+for cand in "$ROOT/.venv-hermes/bin/hermes" "$(command -v hermes || true)"; do
+  if [[ -n "$cand" && -x "$cand" ]]; then HERMES_BIN="$cand"; break; fi
+done
+if [[ -z "$HERMES_BIN" ]]; then
   echo "hermes CLI not found." >&2
   echo "Install with: INSTALL_HERMES=1 ./scripts/bootstrap.sh" >&2
-  echo "  (or: python -m pip install --user -U hermes-agent)" >&2
   exit 1
 fi
+echo "hermes: $HERMES_BIN ($("$HERMES_BIN" --version 2>/dev/null | head -1))"
 
 # Discover the model from the running server when possible (spec: /v1/models).
 DISCOVERED="$(curl -fsS -m 3 "$BONSAI_URL/models" 2>/dev/null \
@@ -27,13 +49,45 @@ DISCOVERED="$(curl -fsS -m 3 "$BONSAI_URL/models" 2>/dev/null \
 [[ -n "$DISCOVERED" ]] && MODEL_ID="$DISCOVERED"
 echo "Bonsai model via /v1/models: $MODEL_ID"
 
-# Detect installed Hermes config syntax instead of assuming stale keys.
-HERMES_HELP="$(hermes --help 2>&1 || true)"
+# Model routing in config.yaml (idempotent).
+if "$HERMES_BIN" config set --help >/dev/null 2>&1; then
+  "$HERMES_BIN" config set model.provider custom >/dev/null
+  "$HERMES_BIN" config set model.base_url "$BONSAI_URL" >/dev/null
+  "$HERMES_BIN" config set model.default "$MODEL_ID" >/dev/null
+  "$HERMES_BIN" config set model.api_key "${OPENAI_API_KEY:-local}" >/dev/null
+  echo "model routing -> $BONSAI_URL ($MODEL_ID)"
+fi
+
+# Refuse to start against a serving context Hermes will reject (< 64K).
+# Never silently alter context (SPEC): tell the operator to pick the profile.
+CTX_NOW="$(curl -fsS -m 3 "$BONSAI_URL/models" 2>/dev/null \
+  | python3 -c "
+import json,sys
+m=(json.load(sys.stdin).get('data') or [{}])[0]
+for k in ('context_length','max_model_len','max_context_length'):
+    v=m.get(k)
+    if isinstance(v,int) and v:
+        print(v); break
+else: print('')
+" 2>/dev/null || true)"
+if [[ -n "$CTX_NOW" && "$CTX_NOW" -lt 64000 ]]; then
+  echo "ERROR: Bonsai serving context is $CTX_NOW (< 64000; Hermes gate fails)." >&2
+  echo "Use the agent profile: ./scripts/start-bonsai.sh restart --profile agent" >&2
+  exit 1
+fi
+
+# Detect installed Hermes config syntax instead of assuming stale commands.
+HERMES_HELP="$("$HERMES_BIN" --help 2>&1 || true)"
 if grep -qi 'gateway' <<<"$HERMES_HELP"; then
-  START_CMD=(hermes gateway)
+  # `hermes gateway` alone is the platform manager; `run` executes in foreground.
+  if "$HERMES_BIN" gateway run --help >/dev/null 2>&1; then
+    START_CMD=("$HERMES_BIN" gateway run)
+  else
+    START_CMD=("$HERMES_BIN" gateway)
+  fi
 else
   echo "WARN: installed hermes has no 'gateway' subcommand; trying 'hermes serve'" >&2
-  START_CMD=(hermes serve)
+  START_CMD=("$HERMES_BIN" serve)
 fi
 
 mkdir -p "$(dirname "$ENVFILE")"

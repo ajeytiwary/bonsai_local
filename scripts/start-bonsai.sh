@@ -16,8 +16,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Preserve caller-provided overrides: `set -a; source .env` would clobber them.
+_CALLER_EXTRA="${BONSAI_EXTRA_ARGS-__unset__}"
 [[ -f "$ROOT/.env" ]] && { set -a; # shellcheck disable=SC1091
   source "$ROOT/.env"; set +a; }
+[[ "$_CALLER_EXTRA" != "__unset__" ]] && BONSAI_EXTRA_ARGS="$_CALLER_EXTRA"
+unset _CALLER_EXTRA
 
 LLAMA_SERVER="${BONSAI_LLAMA_SERVER:-/home/plasmion/git/bonsai/llama.cpp/build/bin/llama-server}"
 MODEL="${BONSAI_MODEL:-/media/plasmion/Models/ternary_bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf}"
@@ -48,10 +52,16 @@ done
 [[ -z "$PROFILE" ]] && PROFILE="${BONSAI_PROFILE:-benchmark}"
 
 case "$PROFILE" in
-  benchmark) CTX="${BONSAI_CTX_BENCHMARK:-16384}" ;;
-  agent)     CTX="${BONSAI_CTX_AGENT:-65536}" ;;
+  benchmark) CTX="${BONSAI_CTX_BENCHMARK:-16384}"
+             KV="${BONSAI_KV_CACHE_BENCHMARK:-}" ;;
+  agent)     CTX="${BONSAI_CTX_AGENT:-65536}"
+             # 65536 f16 KV (~4 GiB) OOMs on this 12 GB GPU alongside weights;
+             # quantized KV fits. Override via BONSAI_KV_CACHE_AGENT=f16 to test.
+             KV="${BONSAI_KV_CACHE_AGENT:-q4_0}" ;;
   *) echo "unknown profile '$PROFILE' (use benchmark|agent)" >&2; exit 2 ;;
 esac
+KV_ARGS=()
+[[ -n "$KV" && "$KV" != "f16" ]] && KV_ARGS=( -ctk "$KV" -ctv "$KV" )
 
 mkdir -p "$LOG_DIR"
 
@@ -119,6 +129,7 @@ do_start() {
   echo "starting llama-server: profile=$PROFILE ctx=$CTX port=$PORT" | tee -a "$LOG_FILE"
   echo "  model:  $MODEL" | tee -a "$LOG_FILE"
   echo "  mmproj: $MMPROJ" | tee -a "$LOG_FILE"
+  [[ ${#KV_ARGS[@]} -gt 0 ]] && echo "  kv-cache: $KV (quantized)" | tee -a "$LOG_FILE"
 
   # shellcheck disable=SC2206
   EXTRA=( ${BONSAI_EXTRA_ARGS:-} )
@@ -129,6 +140,7 @@ do_start() {
     --jinja \
     --alias "$MODEL_ID" \
     --host "$HOST" --port "$PORT" \
+    ${KV_ARGS[@]+"${KV_ARGS[@]}"} \
     ${EXTRA[@]+"${EXTRA[@]}"} \
     >>"$LOG_FILE" 2>&1 &
   local pid=$!
