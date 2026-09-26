@@ -1,8 +1,15 @@
 # BUILD STATUS — Bonsai Local Workforce
 
-Current milestone: **M4 complete** (inference resilience, transcripts, context budget, checkpoints, repo index, task-owned git, observability).
+Current milestone: **M5 complete** (persistent symbol/chunk/BM25/dependency/git index with incremental refresh + agent/CLI wiring).
 
 ## Completed acceptance checks
+
+### M5 repository intelligence (2026-09-26)
+- `python -m pytest -q` → **104 passed** (92 existing + 12 new in `tests/test_m5_repo_index.py`).
+- `bonsai_agent/repo_index.py` (M5): versioned `m5` schema at `.agent/repo-index.json`; regex symbol tables per language (Python class/def/method with `Engine.start` qualification via indent stack; JS/TS function/class/arrow; C-like fn/struct/type); overlapping chunks (`FILE path [chars a-b]` headers, 2000 chars / 200 overlap / 8 max); normalized imports + reverse index (`imported_by` handles dotted + slashed forms); `references(symbol)` word-boundary mention counts; per-file git meta (commits/change_count/author/date via `log -n5` + `rev-list --count`); BM25 (k1=1.2, b=0.75) + symbol boost + recency; query modes text|symbol|path|implementation|test|recent (implementation demotes tests ×0.25, test promotes ×8.0, recent orders by recency); `EmbeddingProvider`/`NullEmbeddings` interface (default null, injectable); incremental refresh keyed on mtime+size (second refresh returns 0/0/0); persistence round-trip preserves qualified symbols + git meta.
+- Agent wiring: `Agent.repo_map()` reads the persistent index (path :: symbols :: imports) with naive-TF fallback; `start()` plans from `repo_map()`; `execute_task` refreshes incrementally and searches with mode=test when the task mentions tests else implementation.
+- CLI: `--index-stats` (stats JSON), `--index-search QUERY` (top hits); `python -m bonsai_agent.cli` works via new `__main__.py`.
+- Stdlib-only: no tree-sitter hard dependency (absent in env); regex fallback is the parser.
 
 ### M4 reliability (2026-09-26)
 - `python -m pytest -q` → **92 passed** (66 existing + 26 new in `tests/test_m4_reliability.py`).
@@ -44,7 +51,7 @@ Current milestone: **M4 complete** (inference resilience, transcripts, context b
 
 ## Commands actually run
 ```
-python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed; M4: 92 passed
+python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed; M4: 92 passed; M5: 104 passed
 ./scripts/bootstrap.sh                   # exit 0
 ./scripts/doctor.sh                      # exit 0 (20 PASS / 0 FAIL / 2 WARN)
 ./scripts/smoke-stack.sh                 # exit 0 (7 PASS / 0 FAIL)

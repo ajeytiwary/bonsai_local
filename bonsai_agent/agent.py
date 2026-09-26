@@ -33,6 +33,25 @@ class Agent:
         self._baseline=None; self._protected_before=None
         if hasattr(self.llm,"bind"): self.llm.bind(self._observe_llm)
 
+    def repo_map(self, max_files: int = 200) -> str:
+        """M5 repo map from the persistent index (symbols + imports)."""
+        try:
+            self.index.refresh()
+            lines = []
+            for path in sorted(self.index.docs):
+                d = self.index.docs[path]
+                syms = ", ".join(d.symbols[:12])
+                imp = (" :: imports " + ", ".join(d.imports[:6])
+                       if d.imports else "")
+                lines.append(f"{path} :: {syms}{imp}")
+                if len(lines) >= max_files:
+                    break
+            if lines:
+                return "\n".join(lines)
+        except Exception:
+            pass
+        return self.retrieve.repo_map()
+
     def _observe_llm(self,meta):
         if self._rid is None: return
         self.db.log_llm(self._rid,self._tid,meta.get("role","unknown"),meta.get("usage"),meta.get("seconds",0))
@@ -51,7 +70,7 @@ class Agent:
             self.db.add_task(rid,"Complete TASK.md acceptance task",objective+"\nTASK.md:\n"+task_md,"Complete TASK.md requirements; configured tests pass and benchmark tests remain unchanged.")
             self.db.event(rid,None,"plan",{"mode":"single_task"})
             return rid
-        plan_prompt="OBJECTIVE:\n"+objective+"\n\nTASK.md:\n"+task_md+"\n\nREPO MAP:\n"+self.retrieve.repo_map()
+        plan_prompt="OBJECTIVE:\n"+objective+"\n\nTASK.md:\n"+task_md+"\n\nREPO MAP:\n"+self.repo_map()
         try:
             plan=self.llm.json(PLANNER,plan_prompt,1200,expected="plan",retries=1,reasoning_budget=0)
         except Exception as e:
@@ -109,7 +128,11 @@ class Agent:
         # Incremental index refresh (no full rescan per task) + search.
         try:
             self.index.refresh()
-            relevant=self.index.search(task["title"]+" "+task["description"],self.retrieve_top_k)
+            q = task["title"]+" "+task["description"]
+            ql = q.lower()
+            mode = ("test" if ("test" in ql or "pytest" in ql)
+                    else "implementation")
+            relevant=self.index.search(q,self.retrieve_top_k,mode=mode)
         except Exception:
             relevant=self.retrieve.search(task["title"]+" "+task["description"],self.retrieve_top_k)
         checkpoint=self.db.latest_checkpoint(rid)
