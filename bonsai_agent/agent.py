@@ -18,11 +18,12 @@ from . import testscope
 EDIT_TOOLS=("write_file","replace_in_file","apply_patch","create_file")
 
 class Agent:
-    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False,worker_output_tokens=8192,context_total=65536,progress_sink=None):
+    def __init__(self,root,llm,tests="pytest -q",max_steps=100,compact_every=5,max_repairs=3,retrieve_top_k=8,unsafe_shell=False,auto_commit=True,verify_tests_only=False,worker_output_tokens=8192,context_total=65536,progress_sink=None,decision_provider=None):
         if worker_output_tokens<1024: raise ValueError("worker_output_tokens must be at least 1024")
         self.worker_output_tokens=worker_output_tokens
         self.root=Path(root).resolve(); self.llm=llm; self.tests=tests; self.max_steps=max_steps; self.compact_every=compact_every
         self.max_repairs=max_repairs; self.retrieve_top_k=retrieve_top_k; self.auto_commit=auto_commit; self.verify_tests_only=verify_tests_only
+        self.decide_provider=decision_provider  # M7 OpenJEV: optional, None = heuristics
         self.db=StateDB(self.root/".agent/state.db"); self.tools=WorkspaceTools(self.root,unsafe_shell=unsafe_shell)
         self.retrieve=RepoRetriever(self.root)
         self.index=RepoIndex(self.root)
@@ -51,6 +52,34 @@ class Agent:
         except Exception:
             pass
         return self.retrieve.repo_map()
+
+    @property
+    def decide(self):
+        """M7: the configured OpenJEV provider (None = heuristic mode)."""
+        return self.decide_provider
+
+    def _ask(self, question, choices, evidence=None):
+        """M7: consult OpenJEV, fail closed to choices[0] on any error.
+
+        Never raises; never changes behavior when no provider is set.
+        Escalation is advisory here (recorded in the event log) — the
+        existing heuristic flow continues unchanged.
+        """
+        if self.decide_provider is None or not choices:
+            return choices[0] if choices else ""
+        try:
+            d = self.decide_provider.choose(question, list(choices),
+                                            dict(evidence or {}))
+            try:
+                self.db.event(self._rid, self._tid, "openjev",
+                              {"question": question, "choice": d.choice,
+                               "confidence": d.confidence,
+                               "escalate": d.escalate, "reason": d.reason})
+            except Exception:
+                pass
+            return d.choice if d.choice in choices else choices[0]
+        except Exception:
+            return choices[0]
 
     def _observe_llm(self,meta):
         if self._rid is None: return
@@ -132,6 +161,14 @@ class Agent:
             ql = q.lower()
             mode = ("test" if ("test" in ql or "pytest" in ql)
                     else "implementation")
+            # M7: OpenJEV task_route advises the retrieval mode; the
+            # heuristic above stays the fail-closed fallback.
+            advised = self._ask("task_route",
+                                ["implementation", "test", "research"],
+                                {"title": task["title"],
+                                 "description": task["description"]})
+            if advised in ("test", "implementation"):
+                mode = advised
             relevant=self.index.search(q,self.retrieve_top_k,mode=mode)
         except Exception:
             relevant=self.retrieve.search(task["title"]+" "+task["description"],self.retrieve_top_k)
@@ -174,8 +211,22 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 if call.get("argument_error"):
                     out="ERROR: "+call["argument_error"]+"; retry with complete JSON arguments"; ok=False
                 else:
-                    try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
-                    except Exception as e: out="ERROR: "+repr(e); ok=False
+                    # M7: risk_gate advises on shell commands; BLOCKED stays
+                    # authoritative, escalation is advisory (logged by _ask).
+                    if name in ("run_command", "run_tests"):
+                        gate = self._ask("risk_gate",
+                                         ["allow", "escalate", "block"],
+                                         {"command": (args or {}).get(
+                                             "command", "")})
+                        if gate == "block":
+                            out = ("BLOCKED: OpenJEV risk_gate=block for: " +
+                                   str((args or {}).get("command", ""))[:200]); ok = False
+                        else:
+                            try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
+                            except Exception as e: out="ERROR: "+repr(e); ok=False
+                    else:
+                        try: out=self.tools.execute(name,args); ok=not out.startswith("BLOCKED:")
+                        except Exception as e: out="ERROR: "+repr(e); ok=False
                 if ok and name in EDIT_TOOLS: made_edit=True
                 self.db.log_tool(rid,task["id"],name,args,out,ok)
                 target=str((args or {}).get("path") or (args or {}).get("command") or (args or {}).get("query") or "")[:120]
@@ -211,6 +262,17 @@ Use the available tools to implement the task. Inspect only what is needed, edit
                 self.db.event(rid,task["id"],"verifier_fallback",{"error":repr(e)})
                 verdict={"verdict":"BLOCKED","reason":"Structured verifier failed: "+repr(e),"repair":"Retry verification when the model is available."}
             self.db.event(rid,task["id"],"verify",verdict)
+            # M7: verify_result advises the PASS/FAIL/BLOCKED reading of the
+            # test output; the existing verdict+exit-code check stays
+            # authoritative (fail closed to FAIL on disagreement).
+            advised = self._ask("verify_result", ["PASS", "FAIL", "BLOCKED"],
+                                {"test_output": tests,
+                                 "tests_pass": tests.startswith("exit=0")})
+            if verdict.get("verdict") == "PASS" and advised == "BLOCKED":
+                verdict = {"verdict": "BLOCKED",
+                           "reason": "OpenJEV verify_result=BLOCKED; "
+                                     "treating as blocked.",
+                           "repair": "Retry verification when available."}
             if verdict.get("verdict")=="PASS" and tests.startswith("exit=0"):
                 # Protected-test integrity: any protected modification is failure.
                 prot=None

@@ -1,8 +1,15 @@
 # BUILD STATUS — Bonsai Local Workforce
 
-Current milestone: **M6 complete** (benchmark expansion: Tiers 1-6 fixtures + harness adapters + structured reports; 124 passed).
+Current milestone: **M7 complete** (OpenJEV decision layer: DecisionProvider, local adapter, routing/gating/test/verification, calibrated escalation, Compliance profile; 139 passed).
 
 ## Completed acceptance checks
+
+### M7 OpenJEV (2026-09-26)
+- `python -m pytest tests/test_m7_openjev.py -q` → **15 passed**; full `python -m pytest -q` → **139 passed** (124 existing + 15 new, zero regressions).
+- `bonsai_agent/openjev.py` (M7): `DecisionProvider.choose(question, choices, evidence)` → `Decision(choice, probabilities, confidence, escalate, reason)` + `to_dict()`. Six decisions: task_route (keyword route over title+description; no-signal → uniform → escalate), tool_route (step/made_edit progression read→edit→test), risk_gate (deny-pattern block; compliance escalates mutating rm/git push/commit/chmod/curl/wget), test_scope (generic focused ≤2+low / full / both; compliance forces both), completion_gate (complete only tests_pass+protected_ok+remaining0; compliance blocks complete on dirty protected), verify_result (PASS/FAIL/BLOCKED from tests_pass+output+error). Unknown questions fail closed (uniform, confidence 0.0, escalate=True). Thresholds generic 0.55 / compliance 0.70. Probabilities renormalized post-rounding to sum exactly 1.0. Same `choose` shape for both profiles — orchestration API unchanged.
+- Agent wiring (`bonsai_agent/agent.py`): `Agent(..., decision_provider=None)` stores `decide_provider`; `decide` property exposes it; `_ask(question, choices, evidence)` consults the provider, logs an `openjev` event, returns choice if in choices else choices[0], never raises (fallback choices[0] on any error). Default None = heuristics unchanged. Advisory call sites: task_route advises retrieval mode (heuristic stays fallback), risk_gate advises on run_command/run_tests (BLOCKED stays authoritative), verify_result advises PASS/FAIL/BLOCKED (disagreement with PASS verdict fails closed to BLOCKED).
+- CLI (`bonsai_agent/cli.py`): `--openjev` (enable, generic) + `--openjev-profile generic|compliance`; constructs `LocalDecisionProvider` only when requested, passes as `decision_provider=`.
+- Fixes during development: `_normalize` rounding drift (0.6667+0.1667+0.1667=1.0001) → renormalize top key; no-signal task_route scored implementation 0.9 (confident) → uniform 1.0 each so low-confidence escalates per test.
 
 ### M6 benchmark expansion (2026-09-26)
 - `python -m pytest -q` → **124 passed** (104 existing + 20 new in `tests/test_m6_benchmark.py`).
