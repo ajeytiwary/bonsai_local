@@ -1,6 +1,6 @@
 # BUILD STATUS — Bonsai Local Workforce
 
-Current milestone: **M2 complete** (persistent shell + patch editing + Hermes E2E).
+Current milestone: **M3 complete** (Paperclip control plane → Hermes gateway → Bonsai E2E).
 
 ## Completed acceptance checks
 
@@ -32,21 +32,34 @@ Current milestone: **M2 complete** (persistent shell + patch editing + Hermes E2
 
 ## Commands actually run
 ```
-python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed
+python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed
 ./scripts/bootstrap.sh                   # exit 0
 ./scripts/doctor.sh                      # exit 0 (20 PASS / 0 FAIL / 2 WARN)
 ./scripts/smoke-stack.sh                 # exit 0 (7 PASS / 0 FAIL)
-bash -n scripts/*.sh                     # all six syntax OK
+bash -n scripts/*.sh                     # all syntax OK (incl. provision-paperclip.sh)
 llama-server --help                      # flags validated (see M1)
 ./scripts/start-bonsai.sh start --profile agent   # 65536 + q4_0 KV, healthy (11012/12288 MiB)
 hermes chat -q "Reply with exactly: BONSAI_OK" -Q # BONSAI_OK
 curl POST :8642/v1/chat/completions      # HERMES_8642_OK (~24s)
 hermes chat ... B01 fix ... --yolo       # E2E: patch -> 1 passed focused, 2 passed full
+./scripts/provision-paperclip.sh         # idempotent (company exists + 3 employees exist on re-run)
+paperclipai issue create/checkout/run get/issue get  # BON-2 E2E: succeeded, BONSAI_PC_OK, issue done
 ```
 
 ## Blockers
-- None for M2. Paperclip gateway E2E requires hermes first (M3 — now unblocked).
+- None for M3. BON-1 left `blocked` as negative evidence (broad smoke timed out); BON-2 `done`.
 - Running server is on the agent profile (65536 + q4_0 KV) for Hermes work; restore the benchmark profile (16384) before benchmark runs: `./scripts/start-bonsai.sh restart --profile benchmark`.
 
 ## Next concrete step
-M3 — Paperclip: employee templates (coding/research/QA-verifier), task contract, adapter inspection, real Paperclip→Hermes→Bonsai smoke task, E2E acceptance B.
+M4 — reliability per SPEC: inference resilience (timeouts, bounded backoff+jitter, no-retry 4xx, transcript validation), streaming/live progress, checkpoint/resume, repo retrieval/index.
+
+### M3 Paperclip control plane (2026-09-26)
+- `python -m pytest -q` → **66 passed** (55 existing + 11 new in `tests/test_m3_paperclip.py`: adapter required fields, rejects short key/bad URL/bad strategy, redact never leaks, employee payload schema, rejects bad role, templates coding/research/qa, contract requires fields, to_issue has all tokens, health result shape).
+- `bash -n scripts/provision-paperclip.sh scripts/start-paperclip.sh` → syntax OK.
+- `./scripts/provision-paperclip.sh` → idempotent: company `bonsai-local` reused on second run, 3 employees exist (verified by re-run).
+- `./scripts/start-paperclip.sh` → added strong-key guard refusing placeholder/short `HERMES_KEY` (mirrors `start-hermes.sh`).
+- Canonical payload builders: `bonsai_agent/paperclip.py` (`build_gateway_adapter()`, `build_employee_payload()`, `employee_templates()`, `TaskContract`, `paperclip_health()`, `hermes_gateway_health()`); secrets never logged (`redact_adapter()`).
+- Live control plane: company `bonsai-local` (`21a5b393-...`); employees `Bonsai Coder` (engineer), `Bonsai Researcher` (researcher), `Bonsai QA` (qa) — all `hermes_gateway`, `apiBaseUrl=http://127.0.0.1:8642`, `sessionKeyStrategy=issue`, `timeoutSec=600`, apiKey as Paperclip secret reference.
+- **E2E acceptance B — PASS (BON-2)**: `issue create` (assignee coder) → `issue checkout` (binds `in_progress`, creates execution run `c735c812-...`) → Hermes run `run_f97a58c4-...` → `run completed` on both sides → result `BONSAI_PC_OK` → issue `done`, recovery resolved (`restored`), coder back to `idle`. Usage 18.5K in / 7 out, `timeoutFired: false`. Correct dispatch order is create→checkout→(wake creates execution run); `agent wake` alone makes an unassigned fallback-workspace run that wanders.
+- Negative evidence (BON-1): broad "report workspace + list files" smoke wandered (browser/terminal/file-listing, 570K input tokens) and hit the 600s config timeout → `timed_out dispatching`, issue `blocked`. Lesson recorded in `integrations/paperclip-hermes.md`: keep smoke tasks tiny and reply-only.
+- Controlled interruption demonstrated: BON-1 Hermes run cancelled via gateway (`run.cancelled`), Paperclip run recorded `timed_out` + `recovery_needed` with retry metadata; coder session reset via `agent runtime-state:reset-session`, issue released via `issue force-release`, retry BON-2 on fresh session succeeded.

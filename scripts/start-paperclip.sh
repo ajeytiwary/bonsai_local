@@ -11,7 +11,14 @@ cd "$ROOT"
 PAPERCLIP_CMD="${PAPERCLIP_CMD:-npx paperclipai}"
 PAPERCLIP_WORKDIR="${PAPERCLIP_WORKDIR:-$HOME/.paperclip}"
 HERMES_PORT="${HERMES_PORT:-8642}"
-HERMES_KEY="${HERMES_KEY:-bonsai-local}"
+HERMES_KEY="${HERMES_KEY:-}"
+# The Hermes 8642 endpoint dispatches terminal-capable agent work: refuse to
+# start employees against a placeholder/short key (gateway refuses <16 chars).
+if [[ ${#HERMES_KEY} -lt 16 || "$HERMES_KEY" == "bonsai-local" || "$HERMES_KEY" == "replace-with-openssl-rand-hex-32" ]]; then
+  echo "ERROR: HERMES_KEY must be a strong secret (>=16 chars, not the placeholder)." >&2
+  echo "Generate one:  openssl rand -hex 32   (set HERMES_KEY in .env)" >&2
+  exit 1
+fi
 
 command -v npx >/dev/null 2>&1 || { echo "npx not found — install Node.js >= 20" >&2; exit 1; }
 
