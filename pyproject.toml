@@ -12,6 +12,7 @@ evolution = ["dspy>=3.0","gepa>=0.1"]
 bonsai-agent = "bonsai_agent.cli:main"
 bonsai-bench = "bonsai_agent.benchmark:main"
 bonsai-evolve = "bonsai_agent.evolution:main"
+bonsai-ablation = "bonsai_agent.ablation:main"
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
