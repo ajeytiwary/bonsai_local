@@ -10,7 +10,8 @@ def main():
     p.add_argument("--single-task",action="store_true"); p.add_argument("--verify-tests-only",action="store_true"); p.add_argument("--resume",type=int); p.add_argument("--status",type=int); p.add_argument("--unsafe-shell",action="store_true"); p.add_argument("--no-auto-commit",action="store_true")
     a=p.parse_args(); agent=Agent(Path(a.repo),BonsaiLLM(a.url,a.model),a.tests,a.max_steps,a.compact_every,a.max_repairs,a.retrieve_top_k,a.unsafe_shell,not a.no_auto_commit,a.verify_tests_only,a.worker_output_tokens)
     if a.status: print(json.dumps(agent.status(a.status),indent=2)); return
-    if a.resume: rid=a.resume
+    if a.resume:
+        print(json.dumps(agent.resume(a.resume),indent=2)); print(json.dumps(agent.status(a.resume),indent=2)); return
     else:
         if not a.objective: p.error("objective required unless --resume/--status supplied")
         rid=agent.start(a.objective,single_task=a.single_task); print("Created run",rid)

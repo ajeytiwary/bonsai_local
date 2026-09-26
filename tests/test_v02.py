@@ -71,7 +71,7 @@ def test_structured_schema_is_sent(monkeypatch):
  class R:
   def raise_for_status(self): pass
   def json(self): return {"usage":{},"choices":[{"message":{"content":'{"verdict":"PASS","reason":"ok","repair":""}'}}]}
- def post(url,json,timeout): seen.update(json); return R()
+ def post(url,json,timeout,headers=None,**kw): seen.update(json); return R()
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().json("s","u",expected="verdict")
  assert x["verdict"]=="PASS"
@@ -95,7 +95,7 @@ def test_json_retries_malformed_structured_output(monkeypatch):
   def __init__(self,x): self.x=x
   def raise_for_status(self): pass
   def json(self): return self.x
- def post(url,json,timeout): return R(next(replies))
+ def post(url,json,timeout,headers=None,**kw): return R(next(replies))
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().json("s","u",expected="action",retries=1)
  assert x["tool"]=="read_file"
@@ -108,7 +108,7 @@ def test_native_tool_call_parsing(monkeypatch):
   def raise_for_status(self): pass
   def json(self):
    return {"usage":{},"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"write_file","arguments":'{"path":"app.py","content":"x=1"}'}}]}}]}
- def post(url,json,timeout): seen.update(json); return R()
+ def post(url,json,timeout,headers=None,**kw): seen.update(json); return R()
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  x=BonsaiLLM().tool_turn([{"role":"user","content":"fix it"}])
  assert x["finish_reason"]=="tool_calls"
@@ -159,7 +159,7 @@ def test_named_tool_choice_limits_available_tools(monkeypatch):
  class Response:
   def raise_for_status(self): pass
   def json(self): return {"choices":[{"message":{"content":"done"}}]}
- def post(url,json,timeout): seen.update(json); return Response()
+ def post(url,json,timeout,headers=None,**kw): seen.update(json); return Response()
  monkeypatch.setattr("bonsai_agent.llm.requests.post",post)
  BonsaiLLM().tool_turn([{"role":"user","content":"write"}],tool_choice={"type":"function","function":{"name":"write_file"}})
  assert seen["tool_choice"]=="required"

@@ -2,6 +2,12 @@ from __future__ import annotations
 import json,time
 import requests
 
+from .resilience import (
+    AttemptError, RetryConfig, backoff_delay, call_with_retry, classify,
+    new_request_id, sanitize,
+)
+from .transcripts import validate_transcript
+
 SCHEMAS={
  "plan":{"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":6,"items":{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"acceptance":{"type":"string"},"depends_on":{"type":"array","items":{"type":"integer"}}},"required":["title","description","acceptance","depends_on"],"additionalProperties":False}}},"required":["tasks"],"additionalProperties":False},
  "verdict":{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","FAIL","BLOCKED"]},"reason":{"type":"string"},"repair":{"type":"string"}},"required":["verdict","reason","repair"],"additionalProperties":False}
@@ -23,14 +29,37 @@ TOOL_SCHEMAS=[
 ]
 
 class BonsaiLLM:
- def __init__(self,base_url='http://127.0.0.1:8091',model='Ternary-Bonsai-2-27B-PQ2_0',timeout=900):
-  self.url=base_url.rstrip('/')+'/v1/chat/completions'; self.model=model; self.timeout=timeout; self.observer=None; self.role="unknown"
+ def __init__(self,base_url='http://127.0.0.1:8091',model='Ternary-Bonsai-2-27B-PQ2_0',timeout=900,connect_timeout=10,retry_config=None,health_hook=None):
+  self.url=base_url.rstrip('/')+'/v1/chat/completions'; self.model=model; self.timeout=timeout; self.connect_timeout=connect_timeout
+  self.retry_config=retry_config or RetryConfig(); self.health_hook=health_hook; self.observer=None; self.role="unknown"
+  self.last_meta={}
  def bind(self,observer=None,role="unknown"): self.observer=observer; self.role=role; return self
+ def _http_timeout(self):
+  # SPEC M4: connect/read timeouts — tuple passthrough to requests.
+  if isinstance(self.timeout,tuple): return self.timeout
+  return (self.connect_timeout,self.timeout)
  def _post(self,payload,max_tokens,temperature,constrained=False):
-  start=time.perf_counter(); res=requests.post(self.url,json=payload,timeout=self.timeout); elapsed=time.perf_counter()-start
-  res.raise_for_status(); data=res.json(); usage=data.get('usage') or {}; timings=data.get('timings') or {}
+  validate_transcript(payload.get('messages') or [])
+  timeout=self._http_timeout()
+  def attempt(_n,rid):
+   start=time.perf_counter()
+   res=requests.post(self.url,json=payload,timeout=timeout,headers={'X-Request-Id':rid})
+   elapsed=time.perf_counter()-start
+   res.raise_for_status()
+   try: data=res.json()
+   except ValueError as e: raise ValueError('Non-JSON response: '+sanitize(res.text[:300])) from e
+   return data,elapsed,res
+  def on_retry(info):
+   if self.observer: self.observer({'role':self.role,'retry':info,'phase':'retry'})
+  try:
+   (data,elapsed,res),meta=call_with_retry(attempt,self.retry_config,on_retry=on_retry,health_hook=self.health_hook)
+  except AttemptError as e:
+   if self.observer: self.observer({'role':self.role,'error':e.as_dict(),'phase':'inference_error'})
+   raise RuntimeError(f"inference failed ({e.kind} status={e.status_code} attempts={e.attempts} rid={e.request_id}): {e.excerpt}") from e
+  self.last_meta=meta
+  usage=data.get('usage') or {}; timings=data.get('timings') or {}
   choice=(data.get('choices') or [{}])[0]; msg=choice.get('message') or {}
-  if self.observer:self.observer({'role':self.role,'usage':usage,'timings':timings,'seconds':elapsed,'max_tokens':max_tokens,'temperature':temperature,'constrained':constrained,'finish_reason':choice.get('finish_reason'),'tool_calls':len(msg.get('tool_calls') or [])})
+  if self.observer:self.observer({'role':self.role,'usage':usage,'timings':timings,'seconds':elapsed,'max_tokens':max_tokens,'temperature':temperature,'constrained':constrained,'finish_reason':choice.get('finish_reason'),'tool_calls':len(msg.get('tool_calls') or []),'request_ids':meta.get('request_ids'),'retries':meta.get('retries')})
   return data
  def chat(self,messages,max_tokens=3000,temperature=0.2,response_schema=None,reasoning_budget=None):
   payload={'model':self.model,'messages':messages,'temperature':temperature,'top_p':0.95,'max_tokens':max_tokens,'stream':False}

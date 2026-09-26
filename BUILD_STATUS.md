@@ -1,8 +1,20 @@
 # BUILD STATUS — Bonsai Local Workforce
 
-Current milestone: **M3 complete** (Paperclip control plane → Hermes gateway → Bonsai E2E).
+Current milestone: **M4 complete** (inference resilience, transcripts, context budget, checkpoints, repo index, task-owned git, observability).
 
 ## Completed acceptance checks
+
+### M4 reliability (2026-09-26)
+- `python -m pytest -q` → **92 passed** (66 existing + 26 new in `tests/test_m4_reliability.py`).
+- Inference resilience (`bonsai_agent/resilience.py`): tuple timeouts (connect 10s, read = model timeout), bounded exponential backoff+jitter (base 0.5s, max 8s) for 429/5xx/timeout/connection errors, no-retry for deterministic malformed 4xx (400/401/403/404/422), per-attempt `X-Request-Id`, sanitized error metadata + body excerpt (secrets redacted, 500-char cap), optional health/restart hook on exhaustion. Wired into `BonsaiLLM._post` (validates transcript before send, sends tuple timeout + request-id header, raises sanitized `RuntimeError`).
+- Native tool transcript validation (`bonsai_agent/transcripts.py`): roles restricted to system/user/assistant/tool, assistant `tool_calls` require unique string ids, every tool result must match a preceding call id (no orphans either direction), `truncate_transcript` keeps system+user + last N complete groups (never splits a group).
+- Context budget (`bonsai_agent/context.py`): token-based `ContextBudget` (default total 65536, reserves for system/task/durable/repo/reasoning/output), `fit_to_budget` progressively keeps 8→1 recent groups + prepends DURABLE SUMMARY, `usage_of().show()` reports `context tok/bud (pct%)` pressure. `agent.execute_task` uses `fit_to_budget` instead of message-count trim.
+- Streaming/live progress + observability (`bonsai_agent/progress.py`): `Progress` emits `[elapsed run= harness/model]` phase/request/tool/test/retry/context/final lines (all sanitized); `EventLog` appends sanitized JSONL to `.agent/events.jsonl` + `summary()` returns benchmark-compatible `{results, clean_count, total_tasks, pass_rate, total_seconds, total_tokens}`.
+- Task-owned git (`bonsai_agent/gitwork.py`): `capture_baseline` (HEAD + porcelain dirt + branch), `changed_vs_baseline` (worktree + index + untracked), `task_owned` (minus pre-existing dirt), `commit_paths` (explicit `git add -- paths`, never blind `add -A`), `quarantine_reset` (unlinks task-owned untracked first, then reset+checkout tracked only — pre-existing user edits untouched), `create_worktree`/`remove_worktree` for isolation.
+- Checkpoint/resume (`bonsai_agent/checkpoints.py`): `Checkpoint` dataclass (objective/acceptance/baseline/task-owned/completed/unresolved/diff/tests/summary/next_action/file_hashes), `write_checkpoint` hashes task-owned files to `.agent/checkpoints/run-{id}.json`, `revalidate` checks baseline commit reachable + hashes unchanged. `agent.compact()` writes file checkpoint; `agent.resume(rid)` revalidates and reports (CLI `--resume` prints report).
+- Incremental repo index (`bonsai_agent/repo_index.py`): persistent `.agent/repo-index.json`, mtime-skipped refresh, BM25 (k1=1.2, b=0.75) + 2x symbol boost + recency from last-20 git log, `search` returns path/score/symbols/imports/recency/content. Primary in `execute_task`, naive TF scan kept as fallback.
+- Test scopes (`bonsai_agent/testscope.py`): `protected_test_files` (test*.py/*_test.py minus .agent/.venv/node_modules/__pycache__), `snapshot_protected`/`verify_protected` (sha256, fails task on modification), `focused_tests_for` (same-dir test_* + tests/test_* fallback). `agent.verify` fails the task if protected tests were modified.
+- SPEC required-tests mapping: patch exactness/ambiguity (M2), protected-test hashes ✅, task-owned staging ✅, dirty isolation/rollback ✅, persistent shell state (M2), token compaction ✅, tool transcript integrity ✅, retry/backoff + no-retry 4xx ✅, checkpoint/resume ✅, incremental repo index ✅, focused-test selection ✅, Hermes config generation (M2), Paperclip adapter + health (M3).
 
 ### M0 baseline (2026-09-25)
 - `python -m pytest -q` → **24 passed** (before and after M1 changes).
@@ -32,7 +44,7 @@ Current milestone: **M3 complete** (Paperclip control plane → Hermes gateway �
 
 ## Commands actually run
 ```
-python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed
+python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed; M4: 92 passed
 ./scripts/bootstrap.sh                   # exit 0
 ./scripts/doctor.sh                      # exit 0 (20 PASS / 0 FAIL / 2 WARN)
 ./scripts/smoke-stack.sh                 # exit 0 (7 PASS / 0 FAIL)
@@ -47,11 +59,11 @@ paperclipai issue create/checkout/run get/issue get  # BON-2 E2E: succeeded, BON
 ```
 
 ## Blockers
-- None for M3. BON-1 left `blocked` as negative evidence (broad smoke timed out); BON-2 `done`.
+- None for M4. Two test failures during development (quarantine untracked pathspec; retry-count mock) fixed before commit.
 - Running server is on the agent profile (65536 + q4_0 KV) for Hermes work; restore the benchmark profile (16384) before benchmark runs: `./scripts/start-bonsai.sh restart --profile benchmark`.
 
 ## Next concrete step
-M4 — reliability per SPEC: inference resilience (timeouts, bounded backoff+jitter, no-retry 4xx, transcript validation), streaming/live progress, checkpoint/resume, repo retrieval/index.
+M5 — benchmark hierarchy per SPEC: Tier 0 gate stays 8/8, Tier 1/2 expansion, long-project gate, results recording.
 
 ### M3 Paperclip control plane (2026-09-26)
 - `python -m pytest -q` → **66 passed** (55 existing + 11 new in `tests/test_m3_paperclip.py`: adapter required fields, rejects short key/bad URL/bad strategy, redact never leaks, employee payload schema, rejects bad role, templates coding/research/qa, contract requires fields, to_issue has all tokens, health result shape).
