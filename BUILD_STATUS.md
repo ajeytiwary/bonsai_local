@@ -11,6 +11,12 @@ Current milestone: **M7 complete** (OpenJEV decision layer: DecisionProvider, lo
 - CLI (`bonsai_agent/cli.py`): `--openjev` (enable, generic) + `--openjev-profile generic|compliance`; constructs `LocalDecisionProvider` only when requested, passes as `decision_provider=`.
 - Fixes during development: `_normalize` rounding drift (0.6667+0.1667+0.1667=1.0001) → renormalize top key; no-signal task_route scored implementation 0.9 (confident) → uniform 1.0 each so low-confidence escalates per test.
 
+### Live Tier-1 validation with OpenJEV (2026-09-26, SPEC definition-of-done)
+- T101 (`benchmarks/tiers_fixtures/T101`, ledger `apply_rate` + `clamp_total`) copied to `/tmp/t101-live`, git init, baseline 4 failed / 1 passed.
+- `python -m bonsai_agent.cli --repo /tmp/t101-live --url http://127.0.0.1:8091 --model bonsai-abliterated-mtp --tests "pytest -q" --single-task --verify-tests-only --openjev "<objective>"` → **complete**, 5 passed (incl hidden), tests + hidden unchanged (`diff` clean), source diff exactly 2 lines (`amount * RATE`, `min(hi, ...)`), run status `complete`.
+- Wall 25.4s, 5 LLM calls, 27,141 total tokens (26,822 prompt / 319 completion). 4 `openjev` events logged: task_route=test 0.82, risk_gate=allow ×2 0.82, verify_result=PASS 0.85 — none escalated, none overrode the heuristic path.
+- Server on agent profile (ctx 65536, `n_ctx_train` 262144) for the run; restore benchmark profile (16384) before benchmark comparisons. Temp dirs removed.
+
 ### M6 benchmark expansion (2026-09-26)
 - `python -m pytest -q` → **124 passed** (104 existing + 20 new in `tests/test_m6_benchmark.py`).
 - Tier definitions (`bonsai_agent/tiers.py`): T101-T501 (tiers 1-5) + T601-T608 (tier 6 adversarial); Tier 0 (B25-B32) untouched/frozen. `benchmarks/tiers.json` written by `write_tiers_json`.

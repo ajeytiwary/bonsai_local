@@ -1,5 +1,150 @@
 # Bonsai Local Agent
 
+## Local Workforce quickstart (M1–M7)
+
+Production-usable local-first AI engineering/research workforce: Bonsai model
+server → `bonsai_agent` runner → Hermes execution harness → Paperclip control
+plane → optional OpenJEV decision layer. All inference stays on this
+workstation (`127.0.0.1`); no cloud calls.
+
+```text
+Paperclip :3100 (control plane: company/employees/issues)
+   | hermes_gateway adapter → Hermes gateway :8642 (api_server adapter)
+   | provider=custom → Bonsai :8091 /v1 (llama.cpp, alias bonsai-abliterated-mtp)
+   |
+bonsai_agent (direct mode: planner/worker/verifier, SQLite, tools, tests)
+   | optional --openjev (generic|compliance closed-set decisions)
+```
+
+### 1. Install
+
+```bash
+cp .env.example .env          # then set HERMES_KEY=$(openssl rand -hex 32)
+./scripts/bootstrap.sh        # project venv, editable install, entry points, unit tests
+source .venv/bin/activate
+```
+
+Requires: Python 3.10+ (3.12 for Hermes venv), Node ≥ 20 (`npx`), Git,
+NVIDIA GPU + GGUF + mmproj paths in `.env`. Secrets live only in gitignored
+`.env` — never commit it.
+
+### 2. Start / stop the stack
+
+```bash
+./scripts/start-bonsai.sh start --profile benchmark   # :8091 ctx 16384 (benchmarks)
+./scripts/start-bonsai.sh start --profile agent       # :8091 ctx 65536 (agent runs)
+./scripts/start-bonsai.sh status
+./scripts/start-bonsai.sh logs
+./scripts/start-bonsai.sh stop
+./scripts/start-hermes.sh                             # gateway :8642 (needs HERMES_KEY ≥ 16 chars)
+./scripts/start-paperclip.sh                          # Paperclip :3100 + hermes_gateway adapter check
+```
+
+Order matters: Bonsai → Hermes → Paperclip. Restore the `benchmark` profile
+before benchmark runs; the running server may be on the `agent` profile.
+
+### 3. Doctor + smoke
+
+```bash
+./scripts/doctor.sh        # 20 checks: python/node/GPU/llama flags/GGUF/ports/health/chat/Hermes/Paperclip
+./scripts/smoke-stack.sh   # unit tests → health → chat+tool round-trip → offline agent → Hermes/Paperclip
+```
+
+### 4. Run the agent (Hermes direct mode)
+
+```bash
+source .venv/bin/activate
+bonsai-agent --repo ~/git/my_project --tests "pytest -q" "Add a health endpoint, tests, and docs"
+python -m bonsai_agent.cli --repo ~/git/my_project --tests "pytest -q" "Fix the failing test"
+# benchmark-style single task with test-backed verdict (no model verifier):
+bonsai-agent --repo /tmp/fixture --tests "pytest -q" --single-task --verify-tests-only "Fix app.py"
+```
+
+Hermes direct mode (model round-trip without the agent loop):
+
+```bash
+.venv-hermes/bin/hermes chat -q "Reply with exactly: BONSAI_OK" -Q --yolo --model bonsai-abliterated-mtp
+curl -fsS http://127.0.0.1:8642/health
+```
+
+### 5. Optional OpenJEV mode (M7)
+
+Closed-set decisions only (`task_route`, `tool_route`, `risk_gate`,
+`test_scope`, `completion_gate`, `verify_result`). Bonsai keeps all
+open-ended reasoning/code/research. Low-confidence/high-risk escalates;
+unknown questions fail closed. Same `choose()` API for both profiles.
+
+```bash
+bonsai-agent --repo ~/git/my_project --tests "pytest -q" --openjev "Implement feature X"
+bonsai-agent --repo ~/git/my_project --tests "pytest -q" --openjev --openjev-profile compliance "Implement feature X"
+python -m bonsai_agent.cli --index-stats
+python -m bonsai_agent.cli --index-search "Engine.start"
+```
+
+Generic threshold 0.55; compliance 0.70 + forces `test_scope=both`,
+escalates mutating shell (`rm`/`git push`/`commit`/`chmod`/`curl`),
+blocks `complete` on dirty protected tests. Default (no flag) = heuristics
+unchanged.
+
+### 6. Paperclip onboarding (M3 control plane)
+
+```bash
+./scripts/provision-paperclip.sh   # company bonsai-local + Coder/Researcher/QA employees
+```
+
+Paperclip order per issue: create → checkout → wake (wake alone wanders).
+Paperclip never edits files directly — it dispatches through Hermes → Bonsai.
+
+### 7. Benchmarks
+
+Tier 0 frozen (B25–B32, 8 fixtures in `benchmarks/fixtures/`):
+
+```bash
+bonsai-bench --split val --out validation.json   # expect 8/8 clean
+```
+
+Harder tiers (M6, `benchmarks/tiers.json` + `tiers_fixtures/` generated):
+
+```bash
+python benchmarks/generate_tiers.py              # materialize T101–T501 (idempotent)
+python -m bonsai_agent.harness --help            # run_bonsai_local / hermes / paperclip adapters
+python -m pytest tests/test_m6_benchmark.py -q
+```
+
+Tier 6 adversarial scenarios (T601–T608) run mock-level, no LLM needed.
+Promotion order: clean → pass_rate → clean_exit → tests_unchanged → tokens → seconds.
+
+### 8. Logs / troubleshooting
+
+```bash
+./scripts/start-bonsai.sh logs
+sqlite3 ~/git/my_project/.agent/state.db "SELECT id,title,status,attempts FROM tasks ORDER BY id;"
+tail -5 ~/git/my_project/.agent/events.jsonl
+curl -fsS http://127.0.0.1:8091/v1/models
+curl -fsS http://127.0.0.1:8642/health
+```
+
+| Symptom | Fix |
+|---|---|
+| `hermes` not on PATH | use `.venv-hermes/bin/hermes` (hermes-agent needs Python ≥ 3.11) |
+| 8642 refused | `hermes gateway run` via `start-hermes.sh`; check `HERMES_KEY` ≥ 16 chars |
+| 64K OOM on 12 GB GPU | agent profile uses `-ctk/-ctv q4_0` KV quant (see `start-bonsai.sh`); or set `BONSAI_CTX_AGENT=32768` explicitly |
+| `ModuleNotFoundError: pkg/store` in tier fixtures | fixture `conftest.py` pins `sys.path` — regenerate via `generate_tiers.py` |
+| Paperclip wake wanders | use create → checkout → wake order |
+| Context pressure | `usage_of().show()` → `context tok/bud (pct%)`; checkpoints compact every 5 tasks |
+
+### 9. Env vars (see `.env.example`)
+
+`BONSAI_LLAMA_SERVER`, `BONSAI_MODEL`, `BONSAI_MMPROJ`, `BONSAI_HOST/PORT`,
+`BONSAI_PROFILE` (benchmark|agent), `BONSAI_CTX_BENCHMARK/AGENT`,
+`BONSAI_MODEL_ID`, `HERMES_PORT/KEY`, `OPENAI_BASE_URL` (local endpoint),
+`PAPERCLIP_CMD/WORKDIR`, `BONSAI_CONNECT_TIMEOUT/READ_TIMEOUT/MAX_RETRIES`,
+`LOG_DIR`, `STATE_DIR`. Caller-passed `BONSAI_EXTRA_ARGS` always wins over `.env`.
+
+---
+
+## Original design notes (M0 runtime)
+
 A small, persistent long-horizon coding agent for **Ternary Bonsai 2** served by the PrismML/llama.cpp OpenAI-compatible API. It is designed for a single local workstation: the model reasons, while Python owns durable state, filesystem changes, shell/git execution, tests, checkpoints, and verification.
 
 ## Why this exists
