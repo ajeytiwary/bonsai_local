@@ -13,3 +13,4 @@ val.json
 test.json
 gepa-dataset.json
 benchmarks/fixtures/
+benchmarks/tiers_fixtures/

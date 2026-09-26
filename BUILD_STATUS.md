@@ -1,8 +1,17 @@
 # BUILD STATUS — Bonsai Local Workforce
 
-Current milestone: **M5 complete** (persistent symbol/chunk/BM25/dependency/git index with incremental refresh + agent/CLI wiring).
+Current milestone: **M6 complete** (benchmark expansion: Tiers 1-6 fixtures + harness adapters + structured reports; 124 passed).
 
 ## Completed acceptance checks
+
+### M6 benchmark expansion (2026-09-26)
+- `python -m pytest -q` → **124 passed** (104 existing + 20 new in `tests/test_m6_benchmark.py`).
+- Tier definitions (`bonsai_agent/tiers.py`): T101-T501 (tiers 1-5) + T601-T608 (tier 6 adversarial); Tier 0 (B25-B32) untouched/frozen. `benchmarks/tiers.json` written by `write_tiers_json`.
+- Fixtures (`benchmarks/generate_tiers.py`, idempotent): T101 ~600-line ledger + 2 bugs; T201 pkg with 15 decoys + cross-file surcharge; T301 git history with regressing commit + REPRO.md; T401 store/model/api stubs; T501 parse/validate/summarize stubs. T201/T401 ship `conftest.py` pinning `sys.path` to the fixture dir (pytest rootdir insertion otherwise breaks `tests/` imports). Every fixture fails its baseline (asserted) and passes after the known-good fix.
+- Harness adapters (`bonsai_agent/harness.py`): `run_bonsai_local` (fixture→tmp→git init unless fixture ships `.git`→baseline fails→Agent single-task verify-tests-only→verify incl hidden_check→protected intact→clean per SPEC promotion ordering); `hermes_cmd` (M2-proven direct-mode argv); `paperclip_contract` (TaskContract workspace/verification → issue title/body); `compare_reports` (clean → pass_rate → clean_exit → tests_unchanged → tokens → seconds). All 5 tier tasks go clean via ScriptedLLM (no model needed).
+- Structured reports (`bonsai_agent/reporting.py`): `write_report` → `{results, clean_count, pass_rate, total_seconds, total_tokens, tiers, promotion}`.
+- Tier 6 (mock-level, no LLM): 503-retry, malformed-args rejection, oversized truncation, flaky recovery, unrelated-dirt preservation, test-tampering detection, checkpoint resume, conflicting-edit rejection — all against the real M2/M4 modules.
+- Fixes during development: harness `_git_init` keeps fixture `.git` (T301 history); ScriptedLLM unique tool_call ids; `quarantine_reset(root, paths)` 2-arg signature; `Editor.replace_in_file` via Editor class; read_file caps at max_chars (no truncation marker); harness `__main__` guard exists so `--help` exits 0.
 
 ### M5 repository intelligence (2026-09-26)
 - `python -m pytest -q` → **104 passed** (92 existing + 12 new in `tests/test_m5_repo_index.py`).
@@ -51,7 +60,8 @@ Current milestone: **M5 complete** (persistent symbol/chunk/BM25/dependency/git 
 
 ## Commands actually run
 ```
-python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed; M4: 92 passed; M5: 104 passed
+python -m pytest -q                      # M0/M1: 24 passed; M2: 55 passed; M3: 66 passed; M4: 92 passed; M5: 104 passed; M6: 124 passed
+python benchmarks/generate_tiers.py      # 5 tier fixtures regenerated (T101-T501)
 ./scripts/bootstrap.sh                   # exit 0
 ./scripts/doctor.sh                      # exit 0 (20 PASS / 0 FAIL / 2 WARN)
 ./scripts/smoke-stack.sh                 # exit 0 (7 PASS / 0 FAIL)
@@ -66,11 +76,11 @@ paperclipai issue create/checkout/run get/issue get  # BON-2 E2E: succeeded, BON
 ```
 
 ## Blockers
-- None for M4. Two test failures during development (quarantine untracked pathspec; retry-count mock) fixed before commit.
+- None for M6. Four test-to-code mismatches during development (fixture .git clobber, duplicate tool ids, quarantine/Editor signatures, missing conftest sys.path) fixed before commit.
 - Running server is on the agent profile (65536 + q4_0 KV) for Hermes work; restore the benchmark profile (16384) before benchmark runs: `./scripts/start-bonsai.sh restart --profile benchmark`.
 
 ## Next concrete step
-M5 — benchmark hierarchy per SPEC: Tier 0 gate stays 8/8, Tier 1/2 expansion, long-project gate, results recording.
+M7 — OpenJEV decision provider per SPEC: `DecisionProvider.choose(question, choices, evidence)` returning choice/probabilities/confidence; `task_route`, `tool_route`, `risk_gate`, `test_scope`, `completion_gate`, `verify_result`; generic OpenJEV then OpenJEV-Compliance without changing the orchestration API.
 
 ### M3 Paperclip control plane (2026-09-26)
 - `python -m pytest -q` → **66 passed** (55 existing + 11 new in `tests/test_m3_paperclip.py`: adapter required fields, rejects short key/bad URL/bad strategy, redact never leaks, employee payload schema, rejects bad role, templates coding/research/qa, contract requires fields, to_issue has all tokens, health result shape).
